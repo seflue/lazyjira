@@ -21,7 +21,8 @@ const (
 	TabComments
 	TabLinks
 	TabInfo
-	tabCount = 5
+	TabHistory
+	tabCount = 6
 )
 
 // MainMode controls what the right panel displays.
@@ -59,10 +60,30 @@ func NewDetailView() *DetailView {
 }
 
 func (d *DetailView) SetIssue(issue *jira.Issue) {
+	prevKey := ""
+	if d.issue != nil {
+		prevKey = d.issue.Key
+	}
 	d.issue = issue
 	d.mode = ModeIssue
-	d.scrollY = 0
-	d.activeTab = TabDetails
+	// Only reset tab/scroll when switching to a different issue.
+	if issue == nil || issue.Key != prevKey {
+		d.scrollY = 0
+		d.activeTab = TabDetails
+	}
+}
+
+// UpdateIssueData stores issue data without changing mode (for background updates).
+func (d *DetailView) UpdateIssueData(issue *jira.Issue) {
+	prevKey := ""
+	if d.issue != nil {
+		prevKey = d.issue.Key
+	}
+	d.issue = issue
+	if issue != nil && issue.Key != prevKey {
+		d.scrollY = 0
+		d.activeTab = TabDetails
+	}
 }
 
 func (d *DetailView) SetProject(project *jira.Project) {
@@ -112,20 +133,46 @@ func (d *DetailView) PrevTab() {
 }
 
 func (d *DetailView) visibleTabs() []DetailTab {
-	tabs := []DetailTab{TabDetails}
-	if d.issue != nil {
-		if len(d.issue.Subtasks) > 0 {
-			tabs = append(tabs, TabSubtasks)
-		}
-		if len(d.issue.Comments) > 0 {
-			tabs = append(tabs, TabComments)
-		}
-		if len(d.issue.IssueLinks) > 0 {
-			tabs = append(tabs, TabLinks)
+	labels := d.tabLabels()
+	tabs := make([]DetailTab, len(labels))
+	for i, l := range labels {
+		tabs[i] = l.tab
+	}
+	return tabs
+}
+
+// ClickTab switches tab based on x position in the title bar.
+func (d *DetailView) ClickTab(x int) {
+	if d.issue == nil {
+		return
+	}
+	// Reconstruct tab labels and their positions in the title.
+	type tabPos struct {
+		tab   DetailTab
+		start int
+		end   int
+	}
+	labels := d.tabLabels()
+	prefix := fmt.Sprintf("[0] %s", d.issue.Key)
+	sep := " - "
+	pos := len(prefix) + len(sep)
+
+	var positions []tabPos
+	for i, tl := range labels {
+		end := pos + len(tl.label)
+		positions = append(positions, tabPos{tab: tl.tab, start: pos, end: end})
+		if i < len(labels)-1 {
+			pos = end + len(sep)
 		}
 	}
-	tabs = append(tabs, TabInfo)
-	return tabs
+
+	for _, p := range positions {
+		if x >= p.start && x < p.end {
+			d.activeTab = p.tab
+			d.scrollY = 0
+			return
+		}
+	}
 }
 
 func (d *DetailView) ScrollBy(delta int) {
@@ -167,10 +214,8 @@ func (d *DetailView) Update(msg tea.Msg) (*DetailView, tea.Cmd) {
 }
 
 func (d *DetailView) visibleRows() int {
-	// Total height = innerHeight + 2 (borders).
-	// innerHeight = tabs line + scrollable content lines.
-	// So scrollable = height - 2 (borders) - 1 (tabs) = height - 3.
-	rows := d.height - 3
+	// Total height = innerHeight + 2 (borders). Tabs are in the title now.
+	rows := d.height - 2
 	if rows < 1 {
 		rows = 1
 	}
@@ -200,19 +245,14 @@ func (d *DetailView) View() string {
 	visible := d.visibleRows()
 
 	// Issue mode.
-	title := "[0] Detail"
-	if d.issue != nil {
-		title = fmt.Sprintf("[0] %s: %s", d.issue.Key, d.issue.Summary)
-		title = truncateRunes(title, contentWidth-2)
-	}
-
 	if d.issue == nil {
+		title := "[0] Detail"
 		placeholder := lipgloss.NewStyle().Foreground(theme.ColorGray).Render("Select an issue to view details")
 		return components.RenderPanel(title, placeholder, d.width, innerH, d.focused)
 	}
 
-	// Tabs line.
-	tabs := d.renderTabs(contentWidth)
+	// Build title: [0] KEY - Tab - Tab - Tab
+	title := d.buildTitle(contentWidth)
 
 	// Content lines.
 	var contentLines []string
@@ -227,6 +267,8 @@ func (d *DetailView) View() string {
 		contentLines = d.renderLinks(contentWidth)
 	case TabInfo:
 		contentLines = d.renderInfo(contentWidth)
+	case TabHistory:
+		contentLines = d.renderHistory(contentWidth)
 	}
 
 	// Apply scroll.
@@ -246,51 +288,57 @@ func (d *DetailView) View() string {
 		scrolled = scrolled[:visible]
 	}
 
-	// Build content: tabs + body.
-	body := tabs + "\n" + strings.Join(scrolled, "\n")
+	body := strings.Join(scrolled, "\n")
 
 	return components.RenderPanel(title, body, d.width, innerH, d.focused)
 }
 
-func (d *DetailView) renderTabs(width int) string {
-	activeStyle := lipgloss.NewStyle().
-		Foreground(theme.ColorGreen).
-		Bold(true).
-		Padding(0, 1)
+type tabLabel struct {
+	tab   DetailTab
+	label string
+}
 
-	inactiveStyle := lipgloss.NewStyle().
-		Foreground(theme.ColorGray).
-		Padding(0, 1)
-
-	// Build visible tabs with counters. Hide tabs with 0 items.
-	type tabDef struct {
-		tab   DetailTab
-		label string
-	}
-	var tabs []tabDef
-	tabs = append(tabs, tabDef{TabDetails, "Details"})
+func (d *DetailView) tabLabels() []tabLabel {
+	var tabs []tabLabel
+	tabs = append(tabs, tabLabel{TabDetails, "Body"})
 	if d.issue != nil {
 		if n := len(d.issue.Subtasks); n > 0 {
-			tabs = append(tabs, tabDef{TabSubtasks, fmt.Sprintf("Subtasks(%d)", n)})
+			tabs = append(tabs, tabLabel{TabSubtasks, fmt.Sprintf("Sub(%d)", n)})
 		}
 		if n := len(d.issue.Comments); n > 0 {
-			tabs = append(tabs, tabDef{TabComments, fmt.Sprintf("Comments(%d)", n)})
+			tabs = append(tabs, tabLabel{TabComments, fmt.Sprintf("Cmt(%d)", n)})
 		}
 		if n := len(d.issue.IssueLinks); n > 0 {
-			tabs = append(tabs, tabDef{TabLinks, fmt.Sprintf("Links(%d)", n)})
+			tabs = append(tabs, tabLabel{TabLinks, fmt.Sprintf("Lnk(%d)", n)})
 		}
 	}
-	tabs = append(tabs, tabDef{TabInfo, "Info"})
+	tabs = append(tabs, tabLabel{TabInfo, "Info"})
+	if d.issue != nil && len(d.issue.Changelog) > 0 {
+		tabs = append(tabs, tabLabel{TabHistory, fmt.Sprintf("Hist(%d)", len(d.issue.Changelog))})
+	}
+	return tabs
+}
 
-	var parts []string
+func (d *DetailView) buildTitle(maxWidth int) string {
+	tabs := d.tabLabels()
+
+	activeStyle := lipgloss.NewStyle().Foreground(theme.ColorGreen).Bold(true)
+	inactiveStyle := lipgloss.NewStyle().Foreground(theme.ColorWhite)
+	sepStyle := lipgloss.NewStyle().Foreground(theme.ColorGray)
+
+	prefix := fmt.Sprintf("[0] %s", d.issue.Key)
+
+	var tabParts []string
 	for _, t := range tabs {
 		if t.tab == d.activeTab {
-			parts = append(parts, activeStyle.Render(t.label))
+			tabParts = append(tabParts, activeStyle.Render(t.label))
 		} else {
-			parts = append(parts, inactiveStyle.Render(t.label))
+			tabParts = append(tabParts, inactiveStyle.Render(t.label))
 		}
 	}
-	return " " + lipgloss.JoinHorizontal(lipgloss.Top, parts...)
+
+	sep := sepStyle.Render(" - ")
+	return prefix + sep + strings.Join(tabParts, sep)
 }
 
 func (d *DetailView) renderDescription(width int) []string {
@@ -302,9 +350,31 @@ func (d *DetailView) renderDescription(width int) []string {
 		desc = "(no description)"
 	}
 	for _, line := range wrapText(desc, width-2) {
-		lines = append(lines, " "+valStyle.Render(line))
+		lines = append(lines, " "+colorMentions(valStyle.Render(line)))
 	}
 	return lines
+}
+
+// colorMentions replaces \x00MENTION:@Name\x00 markers with colored author names.
+func colorMentions(s string) string {
+	const prefix = "\x00MENTION:"
+	const suffix = "\x00"
+	result := s
+	for {
+		start := strings.Index(result, prefix)
+		if start == -1 {
+			break
+		}
+		rest := result[start+len(prefix):]
+		end := strings.Index(rest, suffix)
+		if end == -1 {
+			break
+		}
+		name := rest[:end]
+		colored := theme.AuthorRender(name)
+		result = result[:start] + colored + rest[end+len(suffix):]
+	}
+	return result
 }
 
 func (d *DetailView) renderSubtasks(width int) []string {
@@ -338,14 +408,14 @@ func (d *DetailView) renderInfo(width int) []string {
 
 	assignee := "Unassigned"
 	if issue.Assignee != nil {
-		assignee = issue.Assignee.DisplayName
+		assignee = theme.AuthorRender(issue.Assignee.DisplayName)
 	}
 	reporter := "Unknown"
 	if issue.Reporter != nil {
-		reporter = issue.Reporter.DisplayName
+		reporter = theme.AuthorRender(issue.Reporter.DisplayName)
 	}
-	lines = append(lines, fmt.Sprintf(" %-11s %s", "Assignee:", valStyle.Render(assignee)))
-	lines = append(lines, fmt.Sprintf(" %-11s %s", "Reporter:", valStyle.Render(reporter)))
+	lines = append(lines, fmt.Sprintf(" %-11s %s", "Assignee:", assignee))
+	lines = append(lines, fmt.Sprintf(" %-11s %s", "Reporter:", reporter))
 
 	typeName := "Unknown"
 	if issue.IssueType != nil {
@@ -373,6 +443,72 @@ func (d *DetailView) renderInfo(width int) []string {
 	return lines
 }
 
+// renderEntry renders a single author+time header + content block + separator.
+func renderEntry(author string, created time.Time, content []string, width int, last bool) []string {
+	gray := lipgloss.NewStyle().Foreground(theme.ColorGray)
+	var lines []string
+	lines = append(lines, " "+theme.AuthorRender(author)+" "+gray.Render(timeAgo(created)))
+	lines = append(lines, content...)
+	if !last {
+		lines = append(lines, " "+strings.Repeat("─", width-2))
+	}
+	return lines
+}
+
+func (d *DetailView) renderHistory(width int) []string {
+	if d.issue == nil || len(d.issue.Changelog) == 0 {
+		return []string{" No history."}
+	}
+
+	gray := lipgloss.NewStyle().Foreground(theme.ColorGray)
+	var lines []string
+
+	// Reverse order: newest first.
+	for i := len(d.issue.Changelog) - 1; i >= 0; i-- {
+		entry := d.issue.Changelog[i]
+		author := "Unknown"
+		if entry.Author != nil {
+			author = entry.Author.DisplayName
+		}
+
+		var content []string
+		for _, item := range entry.Items {
+			from := cleanWikiMarkup(item.FromString)
+			to := cleanWikiMarkup(item.ToString)
+			if from == "" {
+				from = "none"
+			}
+			if to == "" {
+				to = "none"
+			}
+
+			field := strings.ToLower(item.Field)
+
+			if field == "description" || field == "comment" || field == "environment" {
+				content = append(content, "   "+gray.Render(item.Field)+gray.Render(":"))
+				content = append(content, renderDiff(from, to, width-4)...)
+				continue
+			}
+
+			if field == "assignee" || field == "reviewer" || field == "reporter" {
+				if from != "none" {
+					from = theme.AuthorRender(from)
+				}
+				if to != "none" {
+					to = theme.AuthorRender(to)
+				}
+			}
+			changeLine := fmt.Sprintf("   %s: %s → %s", gray.Render(item.Field), from, to)
+			for _, wl := range wrapText(changeLine, width-2) {
+				content = append(content, wl)
+			}
+		}
+
+		lines = append(lines, renderEntry(author, entry.Created, content, width, i == 0)...)
+	}
+	return lines
+}
+
 func (d *DetailView) renderComments(width int) []string {
 	if d.issue == nil {
 		return []string{" No issue selected."}
@@ -381,7 +517,6 @@ func (d *DetailView) renderComments(width int) []string {
 		return []string{" No comments."}
 	}
 
-	keyStyle := d.theme.KeyStyle
 	valStyle := d.theme.ValueStyle
 	var lines []string
 	for i, c := range d.issue.Comments {
@@ -389,14 +524,13 @@ func (d *DetailView) renderComments(width int) []string {
 		if c.Author != nil {
 			author = c.Author.DisplayName
 		}
-		ago := timeAgo(c.Created)
-		lines = append(lines, " "+keyStyle.Render(fmt.Sprintf("%s (%s):", author, ago)))
+
+		var content []string
 		for _, wl := range wrapText(c.Body, width-2) {
-			lines = append(lines, " "+valStyle.Render(wl))
+			content = append(content, " "+colorMentions(valStyle.Render(wl)))
 		}
-		if i < len(d.issue.Comments)-1 {
-			lines = append(lines, " "+strings.Repeat("─", width/2))
-		}
+
+		lines = append(lines, renderEntry(author, c.Created, content, width, i == len(d.issue.Comments)-1)...)
 	}
 	return lines
 }
@@ -498,6 +632,122 @@ func (d *DetailView) priorityStyled(name string) string {
 	default:
 		return d.theme.PriorityLow.Render(name)
 	}
+}
+
+// renderDiff shows removed lines in red and added lines in green.
+func renderDiff(from, to string, maxWidth int) []string {
+	redStyle := lipgloss.NewStyle().Foreground(theme.ColorRed)
+	greenStyle := lipgloss.NewStyle().Foreground(theme.ColorGreen)
+
+	fromLines := strings.Split(strings.TrimSpace(from), "\n")
+	toLines := strings.Split(strings.TrimSpace(to), "\n")
+
+	// Build sets for simple diff.
+	fromSet := make(map[string]bool)
+	toSet := make(map[string]bool)
+	for _, l := range fromLines {
+		fromSet[strings.TrimSpace(l)] = true
+	}
+	for _, l := range toLines {
+		toSet[strings.TrimSpace(l)] = true
+	}
+
+	var lines []string
+
+	// Show removed lines (in from but not in to).
+	for _, l := range fromLines {
+		trimmed := strings.TrimSpace(l)
+		if trimmed == "" || trimmed == "none" {
+			continue
+		}
+		if !toSet[trimmed] {
+			for _, wl := range wrapText("- "+trimmed, maxWidth) {
+				lines = append(lines, "    "+redStyle.Render(wl))
+			}
+		}
+	}
+
+	// Show added lines (in to but not in from).
+	for _, l := range toLines {
+		trimmed := strings.TrimSpace(l)
+		if trimmed == "" || trimmed == "none" {
+			continue
+		}
+		if !fromSet[trimmed] {
+			for _, wl := range wrapText("+ "+trimmed, maxWidth) {
+				lines = append(lines, "    "+greenStyle.Render(wl))
+			}
+		}
+	}
+
+	if len(lines) == 0 {
+		lines = append(lines, "    "+lipgloss.NewStyle().Foreground(theme.ColorGray).Render("(content changed)"))
+	}
+
+	return lines
+}
+
+// cleanWikiMarkup strips Jira wiki markup from changelog values.
+// Handles: [~accountid:...], {code:lang}...{code}, [text|url], etc.
+func cleanWikiMarkup(s string) string {
+	if s == "" {
+		return s
+	}
+	result := s
+
+	// [~accountid:UUID] → replace with @user (unresolved mentions)
+	for {
+		start := strings.Index(result, "[~accountid:")
+		if start == -1 {
+			break
+		}
+		end := strings.Index(result[start:], "]")
+		if end == -1 {
+			break
+		}
+		result = result[:start] + "@user" + result[start+end+1:]
+	}
+
+	// {code:lang}...{code} → just the content
+	for {
+		start := strings.Index(result, "{code")
+		if start == -1 {
+			break
+		}
+		// Find closing }
+		endOpen := strings.Index(result[start:], "}")
+		if endOpen == -1 {
+			break
+		}
+		// Find {code} closing tag
+		closeTag := strings.Index(result[start+endOpen+1:], "{code}")
+		if closeTag == -1 {
+			// No closing tag, just strip the opening
+			result = result[:start] + result[start+endOpen+1:]
+			continue
+		}
+		content := result[start+endOpen+1 : start+endOpen+1+closeTag]
+		result = result[:start] + strings.TrimSpace(content) + result[start+endOpen+1+closeTag+6:]
+	}
+
+	// [text|url] → text
+	for {
+		start := strings.Index(result, "[")
+		if start == -1 {
+			break
+		}
+		end := strings.Index(result[start:], "]")
+		if end == -1 {
+			break
+		}
+		inner := result[start+1 : start+end]
+		if pipe := strings.Index(inner, "|"); pipe != -1 {
+			inner = inner[:pipe]
+		}
+		result = result[:start] + inner + result[start+end+1:]
+	}
+
+	return strings.TrimSpace(result)
 }
 
 func wrapText(text string, width int) []string {

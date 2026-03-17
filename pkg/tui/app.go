@@ -3,6 +3,8 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 
@@ -36,6 +38,14 @@ type issueDetailLoadedMsg struct{ issue *jira.Issue }
 type transitionDoneMsg struct{}
 type errorMsg struct{ err error }
 type projectsLoadedMsg struct{ projects []jira.Project }
+type issuePrefetchedMsg struct {
+	issue *jira.Issue
+}
+type autoFetchTickMsg struct{}
+type transitionsLoadedMsg struct {
+	issueKey    string
+	transitions []jira.Transition
+}
 
 type App struct {
 	cfg        *config.Config
@@ -50,11 +60,13 @@ type App struct {
 
 	helpBar   components.HelpBar
 	searchBar components.SearchBar
+	modal     components.Modal
 
-	side       focusSide
-	leftFocus  focusPanel
-	projectKey string
-	showHelp   bool // ? popup visible
+	side        focusSide
+	leftFocus   focusPanel
+	projectKey  string
+	showHelp    bool // ? popup visible
+	issueCache  map[string]*jira.Issue
 
 	width  int
 	height int
@@ -83,11 +95,13 @@ func NewAppWithAuth(cfg *config.Config, client *jira.Client, authMethod AuthMeth
 	statusPanel := views.NewStatusPanel(projectKey, cfg.Jira.Email, cfg.Jira.Host)
 	issuesList := views.NewIssuesList()
 	issuesList.SetFocused(true)
+	issuesList.SetUserEmail(cfg.Jira.Email)
 	projectList := views.NewProjectList()
 	detailView := views.NewDetailView()
 	logPanel := views.NewLogPanel()
 	helpBar := components.NewHelpBar(nil)
 	searchBar := components.NewSearchBar()
+	modal := components.NewModal()
 
 	client.SetOnRequest(func(rl jira.RequestLog) {
 		logPanel.AddEntry(views.LogEntry{
@@ -117,9 +131,11 @@ func NewAppWithAuth(cfg *config.Config, client *jira.Client, authMethod AuthMeth
 		logPanel:    logPanel,
 		helpBar:     helpBar,
 		searchBar:   searchBar,
+		modal:       modal,
 		side:        sideLeft,
 		leftFocus:   focusIssues,
 		projectKey:  projectKey,
+		issueCache:  make(map[string]*jira.Issue),
 	}
 	app.helpBar.SetItems(app.helpBarItems())
 	return app
@@ -131,6 +147,10 @@ func (a *App) Init() tea.Cmd {
 	if a.projectKey != "" {
 		cmds = append(cmds, fetchIssues(a.client, a.projectKey))
 	}
+	// Start autofetch timer.
+	cmds = append(cmds, tea.Tick(30*time.Second, func(t time.Time) tea.Msg {
+		return autoFetchTickMsg{}
+	}))
 	return tea.Batch(cmds...)
 }
 
@@ -149,10 +169,23 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// Modal intercepts all keys when visible.
+	if a.modal.IsVisible() {
+		if _, ok := msg.(tea.KeyMsg); ok {
+			updated, cmd := a.modal.Update(msg)
+			a.modal = updated
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			return a, tea.Batch(cmds...)
+		}
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		a.width = msg.Width
 		a.height = msg.Height
+		a.modal.SetSize(msg.Width, msg.Height)
 		a.layoutPanels()
 		a.helpBar.SetWidth(msg.Width)
 		a.searchBar.SetWidth(msg.Width)
@@ -162,25 +195,33 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.handleMouse(msg)
 
 	case components.SearchChangedMsg:
-		a.issuesList.SetFilter(msg.Query)
-		a.projectList.SetFilter(msg.Query)
+		// Filter only the active panel.
+		if a.side == sideLeft && a.leftFocus == focusIssues {
+			a.issuesList.SetFilter(msg.Query)
+		} else if a.side == sideLeft && a.leftFocus == focusProjects {
+			a.projectList.SetFilter(msg.Query)
+		}
 		return a, nil
 
 	case components.SearchConfirmedMsg:
-		// Select best match (current top item), then reset filter.
 		var cmd tea.Cmd
-		if a.side == sideLeft && a.leftFocus == focusProjects {
-			// Trigger enter on filtered project list.
+		if a.side == sideLeft && a.leftFocus == focusIssues {
+			selectedIssue := a.issuesList.SelectedIssue()
+			a.issuesList.ClearFilter()
+			if selectedIssue != nil {
+				a.issuesList.SelectByKey(selectedIssue.Key)
+				cmds = append(cmds, fetchIssueDetail(a.client, selectedIssue.Key))
+			}
+		} else if a.side == sideLeft && a.leftFocus == focusProjects {
 			updated, c := a.projectList.Update(tea.KeyMsg{Type: tea.KeyEnter})
 			a.projectList = updated
 			cmd = c
+			a.projectList.SetFilter("")
 		}
-		a.issuesList.SetFilter("")
-		a.projectList.SetFilter("")
 		if cmd != nil {
-			return a, cmd
+			cmds = append(cmds, cmd)
 		}
-		return a, nil
+		return a, tea.Batch(cmds...)
 
 	case components.SearchCancelledMsg:
 		a.issuesList.SetFilter("")
@@ -247,13 +288,17 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "[":
 			if a.side == sideRight {
 				a.detailView.PrevTab()
-				return a, nil
+			} else if a.side == sideLeft && a.leftFocus == focusIssues {
+				a.issuesList.PrevTab()
 			}
+			return a, nil
 		case "]":
 			if a.side == sideRight {
 				a.detailView.NextTab()
-				return a, nil
+			} else if a.side == sideLeft && a.leftFocus == focusIssues {
+				a.issuesList.NextTab()
 			}
+			return a, nil
 
 		case "0":
 			a.side = sideRight
@@ -271,10 +316,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "2":
 			a.side = sideLeft
 			a.leftFocus = focusIssues
-			// Restore issue detail.
 			if sel := a.issuesList.SelectedIssue(); sel != nil {
-				a.updateFocusState()
-				return a, fetchIssueDetail(a.client, sel.Key)
+				if cached, ok := a.issueCache[sel.Key]; ok {
+					a.detailView.SetIssue(cached)
+				}
 			}
 			a.updateFocusState()
 			return a, nil
@@ -284,30 +329,120 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.updateFocusState()
 			return a, nil
 
+		case "o":
+			// Open issue in browser.
+			if a.side == sideLeft && a.leftFocus == focusIssues {
+				if sel := a.issuesList.SelectedIssue(); sel != nil {
+					url := a.cfg.Jira.Host + "/browse/" + sel.Key
+					openBrowser(url)
+				}
+			}
+			return a, nil
+
+		case "t":
+			// Transition: fetch available transitions for selected issue.
+			if a.side == sideLeft && a.leftFocus == focusIssues {
+				if sel := a.issuesList.SelectedIssue(); sel != nil {
+					return a, fetchTransitions(a.client, sel.Key)
+				}
+			}
+			return a, nil
+
 		case "r":
+			// Refresh current issue detail.
+			if sel := a.issuesList.SelectedIssue(); sel != nil {
+				return a, fetchIssueDetail(a.client, sel.Key)
+			}
+			return a, nil
+
+		case "R":
+			// Full refresh: issues list + all details.
 			if a.projectKey != "" {
 				return a, fetchIssues(a.client, a.projectKey)
 			}
 			return a, nil
 		}
 
+	case autoFetchTickMsg:
+		var fetchCmds []tea.Cmd
+		if a.projectKey != "" {
+			fetchCmds = append(fetchCmds, fetchIssues(a.client, a.projectKey))
+		}
+		// Schedule next tick.
+		fetchCmds = append(fetchCmds, tea.Tick(30*time.Second, func(t time.Time) tea.Msg {
+			return autoFetchTickMsg{}
+		}))
+		return a, tea.Batch(fetchCmds...)
+
 	case issuesLoadedMsg:
 		a.err = nil
 		a.statusPanel.SetOnline(true)
+		a.issueCache = make(map[string]*jira.Issue) // clear cache on refresh
 		a.issuesList.SetIssues(msg.issues)
-		if sel := a.issuesList.SelectedIssue(); sel != nil {
-			cmds = append(cmds, fetchIssueDetail(a.client, sel.Key))
+		// Prefetch all issue details in background.
+		for _, issue := range msg.issues {
+			cmds = append(cmds, prefetchIssue(a.client, issue.Key))
 		}
 		return a, tea.Batch(cmds...)
 
 	case issueDetailLoadedMsg:
-		a.detailView.SetIssue(msg.issue)
+		if msg.issue != nil {
+			a.issueCache[msg.issue.Key] = msg.issue
+		}
+		if a.leftFocus == focusIssues || a.side == sideRight {
+			a.detailView.SetIssue(msg.issue)
+		} else {
+			a.detailView.UpdateIssueData(msg.issue)
+		}
+		return a, nil
+
+	case issuePrefetchedMsg:
+		if msg.issue != nil {
+			a.issueCache[msg.issue.Key] = msg.issue
+			// If this is the currently selected issue, update detail.
+			if sel := a.issuesList.SelectedIssue(); sel != nil && sel.Key == msg.issue.Key {
+				if a.leftFocus == focusIssues || a.side == sideRight {
+					a.detailView.SetIssue(msg.issue)
+				}
+			}
+		}
 		return a, nil
 
 	case transitionDoneMsg:
 		if a.projectKey != "" {
-			return a, fetchIssues(a.client, a.projectKey)
+			var fetchCmds []tea.Cmd
+			fetchCmds = append(fetchCmds, fetchIssues(a.client, a.projectKey))
+			if sel := a.issuesList.SelectedIssue(); sel != nil {
+				fetchCmds = append(fetchCmds, fetchIssueDetail(a.client, sel.Key))
+			}
+			return a, tea.Batch(fetchCmds...)
 		}
+		return a, nil
+
+	case transitionsLoadedMsg:
+		if len(msg.transitions) == 0 {
+			return a, nil
+		}
+		var items []components.ModalItem
+		for _, t := range msg.transitions {
+			label := t.Name
+			if t.To != nil {
+				label += " → " + t.To.Name
+			}
+			items = append(items, components.ModalItem{ID: t.ID, Label: label})
+		}
+		a.modal.SetSize(a.width, a.height)
+		a.modal.Show("Transition: "+msg.issueKey, items)
+		return a, nil
+
+	case components.ModalSelectedMsg:
+		// Execute transition.
+		if sel := a.issuesList.SelectedIssue(); sel != nil {
+			return a, doTransition(a.client, sel.Key, msg.Item.ID)
+		}
+		return a, nil
+
+	case components.ModalCancelledMsg:
 		return a, nil
 
 	case errorMsg:
@@ -317,7 +452,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case views.IssueSelectedMsg:
 		if msg.Issue != nil {
-			return a, fetchIssueDetail(a.client, msg.Issue.Key)
+			// Use cache — instant render, no API call.
+			if cached, ok := a.issueCache[msg.Issue.Key]; ok {
+				a.detailView.SetIssue(cached)
+			} else {
+				// Fallback: show basic info from list, detail will arrive from prefetch.
+				a.detailView.SetIssue(msg.Issue)
+			}
 		}
 		return a, nil
 
@@ -425,6 +566,11 @@ func (a *App) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		} else {
 			a.side = sideRight
 			a.updateFocusState()
+			// Check if click is on title bar (y == 0) → tab click.
+			if y == 0 {
+				relX := x - sideW
+				a.detailView.ClickTab(relX)
+			}
 		}
 		return a, nil
 	}
@@ -485,8 +631,31 @@ func (a *App) View() string {
 		a.projectList.View(),
 	)
 
+	// Right column: show modal in detail area when visible, otherwise detail view.
+	var detailArea string
+	if a.modal.IsVisible() {
+		sideW := a.cfg.GUI.SidePanelWidth
+		if sideW <= 0 {
+			sideW = 40
+		}
+		if sideW > a.width/2 {
+			sideW = a.width / 2
+		}
+		mainW := a.width - sideW
+		detailH := a.height - 1 - 8
+		if detailH < 5 {
+			detailH = 5
+		}
+		popup := a.modal.View()
+		detailArea = lipgloss.Place(mainW, detailH,
+			lipgloss.Center, lipgloss.Center,
+			popup,
+		)
+	} else {
+		detailArea = a.detailView.View()
+	}
 	rightCol := lipgloss.JoinVertical(lipgloss.Left,
-		a.detailView.View(),
+		detailArea,
 		a.logPanel.View(),
 	)
 
@@ -510,10 +679,11 @@ func (a *App) View() string {
 
 	full := lipgloss.JoinVertical(lipgloss.Left, content, bottomBar)
 
-	// Help popup overlay.
+	// Overlays.
 	if a.showHelp {
 		full = a.renderHelpOverlay(full)
 	}
+	// Modal is rendered inline in the right column, not as overlay.
 
 	return full
 }
@@ -566,6 +736,19 @@ func (a *App) renderHelpOverlay(base string) string {
 		lipgloss.WithWhitespaceChars(" "),
 		lipgloss.WithWhitespaceForeground(lipgloss.Color("#000000")),
 	)
+}
+
+func openBrowser(url string) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	default:
+		cmd = exec.Command("xdg-open", url)
+	}
+	cmd.Start()
 }
 
 func (a *App) layoutPanels() {
@@ -662,6 +845,10 @@ func fetchIssueDetail(client *jira.Client, key string) tea.Cmd {
 		if err == nil {
 			issue.Comments = comments
 		}
+		changelog, err := client.GetChangelog(context.Background(), key)
+		if err == nil {
+			issue.Changelog = changelog
+		}
 		return issueDetailLoadedMsg{issue: issue}
 	}
 }
@@ -673,6 +860,34 @@ func fetchProjects(client *jira.Client) tea.Cmd {
 			return errorMsg{err: err}
 		}
 		return projectsLoadedMsg{projects: projects}
+	}
+}
+
+func prefetchIssue(client *jira.Client, key string) tea.Cmd {
+	return func() tea.Msg {
+		issue, err := client.GetIssue(context.Background(), key)
+		if err != nil {
+			return nil // silent fail for prefetch
+		}
+		comments, err := client.GetComments(context.Background(), key)
+		if err == nil {
+			issue.Comments = comments
+		}
+		changelog, err := client.GetChangelog(context.Background(), key)
+		if err == nil {
+			issue.Changelog = changelog
+		}
+		return issuePrefetchedMsg{issue: issue}
+	}
+}
+
+func fetchTransitions(client *jira.Client, issueKey string) tea.Cmd {
+	return func() tea.Msg {
+		transitions, err := client.GetTransitions(context.Background(), issueKey)
+		if err != nil {
+			return errorMsg{err: err}
+		}
+		return transitionsLoadedMsg{issueKey: issueKey, transitions: transitions}
 	}
 }
 

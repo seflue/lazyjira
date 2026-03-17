@@ -58,8 +58,23 @@ type Issue struct {
 	Updated     time.Time   `json:"-"`
 	Subtasks    []Issue     `json:"-"`
 	IssueLinks  []IssueLink `json:"-"`
-	Comments    []Comment   `json:"-"`
-	Transitions []Transition `json:"-"`
+	Comments    []Comment        `json:"-"`
+	Changelog   []ChangelogEntry `json:"-"`
+	Transitions []Transition     `json:"-"`
+}
+
+// ChangelogEntry represents a single change in issue history.
+type ChangelogEntry struct {
+	Author  *User
+	Created time.Time
+	Items   []ChangeItem
+}
+
+// ChangeItem is one field change within a changelog entry.
+type ChangeItem struct {
+	Field      string
+	FromString string
+	ToString   string
 }
 
 type Status struct {

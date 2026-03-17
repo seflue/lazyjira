@@ -10,8 +10,9 @@ const (
 	ColorYellow = lipgloss.Color("3")  // ANSI yellow — warnings, in-progress
 	ColorCyan   = lipgloss.Color("6")  // ANSI cyan — search mode
 	ColorWhite  = lipgloss.Color("7")  // ANSI white (light gray)
-	ColorGray   = lipgloss.Color("8")  // ANSI bright black (dark gray)
-	ColorNone   = lipgloss.Color("-1") // default terminal color
+	ColorGray   = lipgloss.Color("8")   // ANSI bright black (dark gray)
+	ColorOrange = lipgloss.Color("208") // ANSI 256 orange — secondary accent (names, metadata)
+	ColorNone   = lipgloss.Color("-1")  // default terminal color
 )
 
 type Theme struct {

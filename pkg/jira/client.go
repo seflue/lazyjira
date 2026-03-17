@@ -29,6 +29,7 @@ type ClientInterface interface {
 	GetComments(ctx context.Context, issueKey string) ([]Comment, error)
 	GetUsers(ctx context.Context, projectKey string) ([]User, error)
 	GetSprints(ctx context.Context, boardID int) ([]Sprint, error)
+	GetChangelog(ctx context.Context, issueKey string) ([]ChangelogEntry, error)
 }
 
 // RequestLog contains info about a completed API request.
@@ -348,6 +349,21 @@ func (c *Client) GetComments(ctx context.Context, issueKey string) ([]Comment, e
 	return comments, nil
 }
 
+func (c *Client) GetChangelog(ctx context.Context, issueKey string) ([]ChangelogEntry, error) {
+	var raw struct {
+		Values []changelogResponse `json:"values"`
+	}
+	err := c.do(ctx, http.MethodGet, "/issue/"+issueKey+"/changelog?maxResults=100", nil, &raw)
+	if err != nil {
+		return nil, fmt.Errorf("get changelog for %s: %w", issueKey, err)
+	}
+	entries := make([]ChangelogEntry, len(raw.Values))
+	for i, rc := range raw.Values {
+		entries[i] = rc.toChangelogEntry()
+	}
+	return entries, nil
+}
+
 func (c *Client) GetUsers(ctx context.Context, projectKey string) ([]User, error) {
 	var raw []userResponse
 	err := c.do(ctx, http.MethodGet, "/user/assignable/search?project="+projectKey+"&maxResults=100", nil, &raw)
@@ -473,9 +489,10 @@ func extractADFText(v interface{}) string {
 			}
 		case "mention":
 			// {"type":"mention","attrs":{"text":"@Name","id":"..."}}
+			// Wrap in markers so TUI can color the full name including spaces.
 			if attrs, ok := node["attrs"].(map[string]interface{}); ok {
 				if text, ok := attrs["text"].(string); ok {
-					return text
+					return "\x00MENTION:" + text + "\x00"
 				}
 			}
 		case "emoji":
@@ -658,4 +675,32 @@ type searchResponse struct {
 	Total      int             `json:"total"`
 	MaxResults int             `json:"maxResults"`
 	StartAt    int             `json:"startAt"`
+}
+
+type changelogResponse struct {
+	Author  *userResponse `json:"author"`
+	Created JiraTime      `json:"created"`
+	Items   []struct {
+		Field      string `json:"field"`
+		FromString string `json:"fromString"`
+		ToString   string `json:"toString"`
+	} `json:"items"`
+}
+
+func (r *changelogResponse) toChangelogEntry() ChangelogEntry {
+	e := ChangelogEntry{
+		Created: r.Created.Time,
+	}
+	if r.Author != nil {
+		u := r.Author.toUser()
+		e.Author = &u
+	}
+	for _, item := range r.Items {
+		e.Items = append(e.Items, ChangeItem{
+			Field:      item.Field,
+			FromString: item.FromString,
+			ToString:   item.ToString,
+		})
+	}
+	return e
 }

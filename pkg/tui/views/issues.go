@@ -15,11 +15,21 @@ import (
 type IssuesLoadedMsg struct{ Issues []jira.Issue }
 type IssueSelectedMsg struct{ Issue *jira.Issue }
 
+// IssueTab defines which subset of issues to show.
+type IssueTab int
+
+const (
+	IssueTabAll      IssueTab = iota
+	IssueTabAssigned
+)
+
 type IssuesList struct {
 	issues      []jira.Issue
 	allIssues   []jira.Issue
 	filter      string
-	keyColWidth int // fixed width for key column, based on longest key
+	tab         IssueTab
+	userEmail   string // for filtering "assigned to me"
+	keyColWidth int
 	cursor      int
 	offset      int
 	width       int
@@ -32,9 +42,27 @@ func NewIssuesList() *IssuesList {
 	return &IssuesList{theme: theme.DefaultTheme()}
 }
 
+func (m *IssuesList) SetUserEmail(email string) { m.userEmail = email }
+
+func (m *IssuesList) NextTab() {
+	if m.tab == IssueTabAll {
+		m.tab = IssueTabAssigned
+	} else {
+		m.tab = IssueTabAll
+	}
+	m.applyFilter()
+}
+
+func (m *IssuesList) PrevTab() { m.NextTab() }
+
 func (m *IssuesList) SetIssues(issues []jira.Issue) {
+	// Remember current selection to preserve position.
+	var selectedKey string
+	if sel := m.SelectedIssue(); sel != nil {
+		selectedKey = sel.Key
+	}
+
 	m.allIssues = issues
-	// Compute key column width from longest key.
 	m.keyColWidth = 0
 	for _, issue := range issues {
 		if w := lipgloss.Width(issue.Key); w > m.keyColWidth {
@@ -42,6 +70,11 @@ func (m *IssuesList) SetIssues(issues []jira.Issue) {
 		}
 	}
 	m.applyFilter()
+
+	// Restore cursor position.
+	if selectedKey != "" {
+		m.SelectByKey(selectedKey)
+	}
 }
 
 func (m *IssuesList) SetFilter(query string) {
@@ -49,13 +82,54 @@ func (m *IssuesList) SetFilter(query string) {
 	m.applyFilter()
 }
 
+// ClearFilter removes the search filter but keeps tab filter. Cursor preserved via SelectByKey.
+func (m *IssuesList) ClearFilter() {
+	m.filter = ""
+	m.applyFilterKeepCursor()
+}
+
+func (m *IssuesList) applyFilterKeepCursor() {
+	prevKey := ""
+	if sel := m.SelectedIssue(); sel != nil {
+		prevKey = sel.Key
+	}
+	m.applyFilter()
+	if prevKey != "" {
+		m.SelectByKey(prevKey)
+	}
+}
+
+// SelectByKey moves cursor to the issue with the given key.
+func (m *IssuesList) SelectByKey(key string) {
+	for i, issue := range m.issues {
+		if issue.Key == key {
+			m.cursor = i
+			m.adjustOffset()
+			return
+		}
+	}
+}
+
 func (m *IssuesList) applyFilter() {
+	// Start from all issues, apply tab filter first.
+	source := m.allIssues
+	if m.tab == IssueTabAssigned && m.userEmail != "" {
+		var assigned []jira.Issue
+		for _, issue := range source {
+			if issue.Assignee != nil && strings.EqualFold(issue.Assignee.Email, m.userEmail) {
+				assigned = append(assigned, issue)
+			}
+		}
+		source = assigned
+	}
+
+	// Then apply text search filter.
 	if m.filter == "" {
-		m.issues = m.allIssues
+		m.issues = source
 	} else {
 		q := strings.ToLower(m.filter)
 		var filtered []jira.Issue
-		for _, issue := range m.allIssues {
+		for _, issue := range source {
 			haystack := strings.ToLower(issue.Key + " " + issue.Summary)
 			if issue.Assignee != nil {
 				haystack += " " + strings.ToLower(issue.Assignee.DisplayName)
@@ -183,8 +257,35 @@ func (m *IssuesList) View() string {
 	}
 
 	content := strings.Join(rows, "\n")
-	title := fmt.Sprintf("[2] Issues (%d)", len(m.issues))
+	title := m.buildTitle()
 	return components.RenderPanel(title, content, m.width, visible, m.focused)
+}
+
+func (m *IssuesList) buildTitle() string {
+	active := lipgloss.NewStyle().Foreground(theme.ColorGreen).Bold(true)
+	inactive := lipgloss.NewStyle().Foreground(theme.ColorWhite)
+	sep := lipgloss.NewStyle().Foreground(theme.ColorGray).Render(" - ")
+
+	// Count assigned issues.
+	assignedCount := 0
+	for _, issue := range m.allIssues {
+		if issue.Assignee != nil && strings.EqualFold(issue.Assignee.Email, m.userEmail) {
+			assignedCount++
+		}
+	}
+
+	allLabel := fmt.Sprintf("All(%d)", len(m.allIssues))
+	assignedLabel := fmt.Sprintf("Assigned(%d)", assignedCount)
+
+	if m.tab == IssueTabAll {
+		allLabel = active.Render(allLabel)
+		assignedLabel = inactive.Render(assignedLabel)
+	} else {
+		allLabel = inactive.Render(allLabel)
+		assignedLabel = active.Render(assignedLabel)
+	}
+
+	return "[2] " + allLabel + sep + assignedLabel
 }
 
 func (m *IssuesList) renderIssueRow(issue jira.Issue, width int, selected bool) string {
