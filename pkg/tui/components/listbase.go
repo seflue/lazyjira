@@ -9,6 +9,7 @@ type ListBase struct {
 	Height    int
 	Focused   bool
 	itemCount int
+	dblClick  DblClickDetector
 }
 
 func (l *ListBase) SetSize(w, h int)       { l.Width = w; l.Height = h }
@@ -47,12 +48,15 @@ func (l *ListBase) ScrollBy(delta int) {
 }
 
 // ClickAt selects an item by relative Y coordinate (relY=0 is top border).
-func (l *ListBase) ClickAt(relY int) {
+// Returns true on double-click (same item clicked twice within 500ms).
+func (l *ListBase) ClickAt(relY int) bool {
 	idx := l.Offset + relY - 1 // -1 for top border
 	if idx >= 0 && idx < l.itemCount {
 		l.Cursor = idx
 		l.AdjustOffset()
+		return l.dblClick.Click(idx)
 	}
+	return false
 }
 
 // KeyNav handles j/k/g/G/ctrl+d/ctrl+u navigation.

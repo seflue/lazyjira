@@ -39,6 +39,10 @@ func (s *StatusPanel) Init() tea.Cmd                              { return nil }
 func (s *StatusPanel) Update(msg tea.Msg) (*StatusPanel, tea.Cmd) { return s, nil }
 
 func (s *StatusPanel) View() string {
+	if s.height <= 1 {
+		return components.RenderCollapsedBar("[1] Status", s.project, s.width, s.focused)
+	}
+
 	_, innerHeight := components.PanelDimensions(s.width, s.height)
 
 	indicator := theme.StatusColor("done").Render("✓")
@@ -55,6 +59,6 @@ func (s *StatusPanel) View() string {
 		side := (maxEmail - 3) / 2
 		email = email[:side+1] + "..." + email[len(email)-side:]
 	}
-	line := fmt.Sprintf(" %s %s → %s", indicator, email, s.project)
+	line := fmt.Sprintf("%s %s → %s", indicator, email, s.project)
 	return components.RenderPanel("[1] Status", line, s.width, innerHeight, s.focused)
 }

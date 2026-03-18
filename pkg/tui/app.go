@@ -1,10 +1,7 @@
 package tui
 
 import (
-	"context"
 	"fmt"
-	"os/exec"
-	"runtime"
 	"strings"
 	"time"
 
@@ -61,6 +58,7 @@ type App struct {
 	detailView  *views.DetailView
 	logPanel    *views.LogPanel
 
+	keymap    Keymap
 	helpBar   components.HelpBar
 	searchBar components.SearchBar
 	modal     components.Modal
@@ -139,6 +137,7 @@ func NewAppWithAuth(cfg *config.Config, client *jira.Client, authMethod AuthMeth
 	app := &App{
 		cfg:        cfg,
 		client:     client,
+		keymap:     DefaultKeymap(),
 		splashInfo: splash,
 		statusPanel: statusPanel,
 		issuesList:  issuesList,
@@ -259,19 +258,20 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 
-		switch msg.String() {
-		case "q", "ctrl+c":
+		action := a.keymap.Match(msg.String())
+		switch action {
+		case ActQuit:
 			return a, tea.Quit
 
-		case "?":
+		case ActHelp:
 			a.showHelp = true
 			return a, nil
 
-		case "/":
+		case ActSearch:
 			a.searchBar.Activate()
 			return a, nil
 
-		case "tab":
+		case ActSwitchPanel:
 			if a.side == sideLeft {
 				a.side = sideRight
 			} else {
@@ -280,22 +280,24 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.updateFocusState()
 			return a, nil
 
-		case "l", "right":
+		case ActFocusRight:
 			if a.side == sideLeft {
 				a.side = sideRight
 				a.updateFocusState()
 				return a, nil
 			}
 
-		case "h", "left", "esc":
+		case ActFocusLeft:
 			if a.side == sideRight {
 				a.side = sideLeft
 				a.updateFocusState()
 				return a, nil
 			}
 
-		case "enter", " ":
-			if a.side == sideLeft && a.leftFocus == focusIssues {
+		case ActSelect:
+			// Primary action: select. On sideRight, fall through to let detail handle it.
+			switch {
+			case a.side == sideLeft && a.leftFocus == focusIssues:
 				if sel := a.issuesList.SelectedIssue(); sel != nil {
 					a.issuesList.SetActiveKey(sel.Key)
 					a.side = sideRight
@@ -303,16 +305,49 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return a, fetchIssueDetail(a.client, sel.Key)
 				}
 				return a, nil
+			case a.side == sideLeft && a.leftFocus == focusProjects:
+				if p := a.projectList.SelectedProject(); p != nil {
+					a.projectKey = p.Key
+					a.statusPanel.SetProject(p.Key)
+					a.projectList.SetActiveKey(p.Key)
+					a.issuesList.ClearActiveKey()
+					a.leftFocus = focusIssues
+					a.updateFocusState()
+					*a.logFlag = true
+					go saveLastProject(p.Key)
+					return a, fetchIssues(a.client, a.projectKey)
+				}
+				return a, nil
 			}
+			// sideRight: let detail view handle expand via its Update.
 
-		case "[":
+		case ActOpen:
+			// Secondary action: open/preview without selecting.
+			// On sideRight, fall through to let detail handle expand.
+			switch {
+			case a.side == sideLeft && a.leftFocus == focusIssues:
+				if sel := a.issuesList.SelectedIssue(); sel != nil {
+					a.side = sideRight
+					a.updateFocusState()
+					return a, fetchIssueDetail(a.client, sel.Key)
+				}
+				return a, nil
+			case a.side == sideLeft && a.leftFocus == focusProjects:
+				if p := a.projectList.SelectedProject(); p != nil {
+					a.detailView.SetProject(p)
+				}
+				return a, nil
+			}
+			// sideRight: let detail view handle expand via its Update.
+
+		case ActPrevTab:
 			if a.side == sideRight {
 				a.detailView.PrevTab()
 			} else if a.side == sideLeft && a.leftFocus == focusIssues {
 				a.issuesList.PrevTab()
 			}
 			return a, nil
-		case "]":
+		case ActNextTab:
 			if a.side == sideRight {
 				a.detailView.NextTab()
 			} else if a.side == sideLeft && a.leftFocus == focusIssues {
@@ -320,20 +355,19 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return a, nil
 
-		case "0":
+		case ActFocusDetail:
 			a.side = sideRight
 			a.updateFocusState()
 			return a, nil
 
-		case "1":
+		case ActFocusStatus:
 			a.side = sideLeft
 			a.leftFocus = focusStatus
-			// Update splash with current project.
 			a.splashInfo.Project = a.projectKey
 			a.detailView.SetSplash(a.splashInfo)
 			a.updateFocusState()
 			return a, nil
-		case "2":
+		case ActFocusIssues:
 			a.side = sideLeft
 			a.leftFocus = focusIssues
 			if sel := a.issuesList.SelectedIssue(); sel != nil {
@@ -341,26 +375,25 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			a.updateFocusState()
 			return a, nil
-		case "3":
+		case ActFocusProj:
 			a.side = sideLeft
 			a.leftFocus = focusProjects
 			a.updateFocusState()
 			return a, nil
 
-		case "y":
+		case ActCopyURL:
 			if sel := a.issuesList.SelectedIssue(); sel != nil {
 				copyToClipboard(a.cfg.Jira.Host + "/browse/" + sel.Key)
 			}
 			return a, nil
 
-		case "o":
+		case ActBrowser:
 			if sel := a.issuesList.SelectedIssue(); sel != nil && (a.leftFocus == focusIssues || a.side == sideRight) {
 				openBrowser(a.cfg.Jira.Host + "/browse/" + sel.Key)
 			}
 			return a, nil
 
-		case "u":
-			// URL picker modal.
+		case ActURLPicker:
 			if sel := a.issuesList.SelectedIssue(); sel != nil {
 				cached := sel
 				if c, ok := a.issueCache[sel.Key]; ok {
@@ -387,7 +420,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return a, nil
 
-		case "t":
+		case ActTransition:
 			if a.side == sideLeft && a.leftFocus == focusIssues {
 				if sel := a.issuesList.SelectedIssue(); sel != nil {
 					*a.logFlag = true
@@ -396,19 +429,22 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return a, nil
 
-		case "r":
+		case ActRefresh:
 			if sel := a.issuesList.SelectedIssue(); sel != nil {
 				*a.logFlag = true
 				return a, fetchIssueDetail(a.client, sel.Key)
 			}
 			return a, nil
 
-		case "R":
+		case ActRefreshAll:
 			if a.projectKey != "" {
 				*a.logFlag = true
 				return a, fetchIssues(a.client, a.projectKey)
 			}
 			return a, nil
+
+		default:
+			// ActInfoTab and nav keys are handled by the focused panel below.
 		}
 
 	case autoFetchTickMsg:
@@ -507,6 +543,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case components.ModalCancelledMsg:
 		return a, nil
 
+	case views.NavigateIssueMsg:
+		a.navigateToIssue(msg.Key)
+		return a, nil
+
 	case views.ExpandBlockMsg:
 		var items []components.ModalItem
 		for _, line := range msg.Lines {
@@ -564,16 +604,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
-	case views.ProjectSelectedMsg:
-		a.projectKey = msg.ProjectKey
-		a.statusPanel.SetProject(msg.ProjectKey)
-		a.projectList.SetActiveKey(msg.ProjectKey)
-		a.issuesList.ClearActiveKey()
-		a.leftFocus = focusIssues
-		a.updateFocusState()
-		*a.logFlag = true
-		go saveLastProject(msg.ProjectKey)
-		return a, fetchIssues(a.client, a.projectKey)
 	}
 
 	// Route input to focused panel.
@@ -607,171 +637,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return a, tea.Batch(cmds...)
-}
-
-func (a *App) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	x, y := msg.X, msg.Y
-	panel, relY := a.hitTest(x, y)
-
-	switch {
-	case msg.Button == tea.MouseButtonWheelUp:
-		return a.mouseScroll(panel, -3)
-	case msg.Button == tea.MouseButtonWheelDown:
-		return a.mouseScroll(panel, 3)
-	case msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft:
-		return a.mouseClick(panel, relY, x)
-	}
-	return a, nil
-}
-
-type panelID int
-
-const (
-	panelStatus panelID = iota
-	panelIssues
-	panelProjects
-	panelDetail
-	panelLog
-)
-
-// hitTest determines which panel the coordinates fall in and the relative Y.
-func (a *App) hitTest(x, y int) (panelID, int) {
-	if a.isVerticalLayout() {
-		// Vertical: all stacked.
-		top := 0
-		if y < top+a.panelStatusH {
-			return panelStatus, y - top
-		}
-		top += a.panelStatusH
-		if y < top+a.panelIssuesH {
-			return panelIssues, y - top
-		}
-		top += a.panelIssuesH
-		if y < top+a.panelProjectsH {
-			return panelProjects, y - top
-		}
-		top += a.panelProjectsH
-		if y < top+a.panelDetailH {
-			return panelDetail, y - top
-		}
-		return panelLog, y - top - a.panelDetailH
-	}
-
-	// Horizontal layout.
-	if x < a.panelSideW {
-		top := 0
-		if y < top+a.panelStatusH {
-			return panelStatus, y - top
-		}
-		top += a.panelStatusH
-		if y < top+a.panelIssuesH {
-			return panelIssues, y - top
-		}
-		top += a.panelIssuesH
-		return panelProjects, y - top
-	}
-
-	// Right side.
-	if y < a.panelDetailH {
-		return panelDetail, y
-	}
-	return panelLog, y - a.panelDetailH
-}
-
-func (a *App) mouseScroll(panel panelID, delta int) (tea.Model, tea.Cmd) {
-	switch panel { //nolint:exhaustive // only scrollable panels handled
-	case panelIssues:
-		if a.side != sideLeft || a.leftFocus != focusIssues {
-			a.side = sideLeft
-			a.leftFocus = focusIssues
-			a.updateFocusState()
-		}
-		if delta > 0 {
-			a.issuesList.ScrollBy(1)
-		} else {
-			a.issuesList.ScrollBy(-1)
-		}
-		if sel := a.issuesList.SelectedIssue(); sel != nil {
-			a.showCachedIssue(sel.Key)
-		}
-	case panelProjects:
-		if a.side != sideLeft || a.leftFocus != focusProjects {
-			a.side = sideLeft
-			a.leftFocus = focusProjects
-			a.updateFocusState()
-		}
-		if delta > 0 {
-			a.projectList.ScrollBy(1)
-		} else {
-			a.projectList.ScrollBy(-1)
-		}
-		if p := a.projectList.SelectedProject(); p != nil {
-			a.detailView.SetProject(p)
-		}
-	case panelDetail:
-		if a.side != sideRight {
-			a.side = sideRight
-			a.updateFocusState()
-		}
-		if delta > 0 {
-			a.detailView.ScrollBy(1)
-		} else {
-			a.detailView.ScrollBy(-1)
-		}
-	}
-	return a, nil
-}
-
-func (a *App) mouseClick(panel panelID, relY int, x int) (tea.Model, tea.Cmd) {
-	switch panel { //nolint:exhaustive // only clickable panels handled
-	case panelStatus:
-		a.side = sideLeft
-		a.leftFocus = focusStatus
-		a.splashInfo.Project = a.projectKey
-		a.detailView.SetSplash(a.splashInfo)
-		a.updateFocusState()
-
-	case panelIssues:
-		a.side = sideLeft
-		a.leftFocus = focusIssues
-		a.updateFocusState()
-		if relY == 0 {
-			// Title bar — tab click (All / Assigned).
-			a.issuesList.ClickTabAt(x)
-		} else {
-			a.issuesList.ClickAt(relY)
-			if sel := a.issuesList.SelectedIssue(); sel != nil {
-				a.showCachedIssue(sel.Key)
-			}
-		}
-
-	case panelProjects:
-		a.side = sideLeft
-		a.leftFocus = focusProjects
-		a.updateFocusState()
-		a.projectList.ClickAt(relY)
-		// Emit hover for preview.
-		if p := a.projectList.SelectedProject(); p != nil {
-			a.detailView.SetProject(p)
-		}
-
-	case panelDetail:
-		a.side = sideRight
-		a.updateFocusState()
-		if relY == 0 {
-			// Title bar → tab click.
-			relX := x
-			if !a.isVerticalLayout() {
-				relX = x - a.panelSideW
-			}
-			a.detailView.ClickTab(relX)
-		} else {
-			if cmd := a.detailView.ClickItem(relY); cmd != nil {
-				return a, cmd
-			}
-		}
-	}
-	return a, nil
 }
 
 func (a *App) View() string {
@@ -899,256 +764,6 @@ func (a *App) renderHelpOverlay(base string) string {
 	)
 }
 
-// showCachedIssue updates the detail view with the cached version of the given issue key.
-func (a *App) showCachedIssue(key string) {
-	if cached, ok := a.issueCache[key]; ok {
-		a.detailView.SetIssue(cached)
-	}
-}
-
-// extractIssueKey checks if a URL points to our Jira and extracts the issue key.
-// e.g. https://didlogic.atlassian.net/browse/DR-13819 → "DR-13819"
-func (a *App) extractIssueKey(url string) string {
-	host := strings.TrimRight(a.cfg.Jira.Host, "/")
-	prefix := host + "/browse/"
-	key, found := strings.CutPrefix(url, prefix)
-	if found {
-		// Strip any trailing query params or fragments.
-		if idx := strings.IndexAny(key, "?#&/"); idx != -1 {
-			key = key[:idx]
-		}
-		if key != "" {
-			return key
-		}
-	}
-	return ""
-}
-
-// navigateToIssue switches to the issue in the issues list.
-// If found in current tab (All/Assigned), selects it there.
-// If not, switches to All tab and tries again.
-func (a *App) navigateToIssue(key string) {
-	// Try current tab first.
-	if a.issuesList.SelectByKey(key) {
-		a.side = sideLeft
-		a.leftFocus = focusIssues
-		a.updateFocusState()
-		a.showCachedIssue(key)
-		return
-	}
-	// Switch to All tab and try again.
-	if a.issuesList.GetTab() != views.IssueTabAll {
-		a.issuesList.SetTab(views.IssueTabAll)
-		if a.issuesList.SelectByKey(key) {
-			a.side = sideLeft
-			a.leftFocus = focusIssues
-			a.updateFocusState()
-			a.showCachedIssue(key)
-			return
-		}
-	}
-	// Not in our list — open in browser as fallback.
-	openBrowser(a.cfg.Jira.Host + "/browse/" + key)
-}
-
-func saveLastProject(projectKey string) {
-	creds, err := config.LoadCredentials()
-	if err != nil || creds == nil {
-		return
-	}
-	creds.LastProject = projectKey
-	_ = config.SaveCredentials(creds)
-}
-
-// platformCommand returns the OS-specific command name and args for the given action.
-func platformCommand(action string, arg string) (name string, args []string) {
-	switch action {
-	case "open":
-		switch runtime.GOOS {
-		case "darwin":
-			return "open", []string{arg}
-		case "windows":
-			return "rundll32", []string{"url.dll,FileProtocolHandler", arg}
-		default:
-			return "xdg-open", []string{arg}
-		}
-	case "copy":
-		switch runtime.GOOS {
-		case "darwin":
-			return "pbcopy", nil
-		case "windows":
-			return "clip", nil
-		default:
-			return "xclip", []string{"-selection", "clipboard"}
-		}
-	}
-	return "", nil
-}
-
-func copyToClipboard(text string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	name, args := platformCommand("copy", "")
-	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Stdin = strings.NewReader(text)
-	_ = cmd.Run()
-}
-
-func openBrowser(url string) {
-	name, args := platformCommand("open", url)
-	cmd := exec.CommandContext(context.Background(), name, args...)
-	_ = cmd.Start()
-}
-
-// isVerticalLayout returns true when terminal is too narrow for side-by-side.
-func (a *App) isVerticalLayout() bool {
-	return a.width < 80
-}
-
-// sideWidth calculates the left panel width, shrinking for narrow terminals.
-func (a *App) sideWidth() int {
-	if a.isVerticalLayout() {
-		return a.width
-	}
-	sideW := a.cfg.GUI.SidePanelWidth
-	if sideW <= 0 {
-		sideW = 40
-	}
-	// Shrink side panel for medium terminals to fit [0] tabs.
-	if a.width < 120 && sideW > a.width*35/100 {
-		sideW = a.width * 35 / 100
-	}
-	if sideW > a.width/2 {
-		sideW = a.width / 2
-	}
-	if sideW < 25 {
-		sideW = 25
-	}
-	return sideW
-}
-
-func (a *App) layoutPanels() {
-	totalH := a.height - 1
-
-	if a.isVerticalLayout() {
-		w := a.width
-		statusH := 3
-		logH := 5
-		projectsH := 3 // projects always minimal in vertical
-		remaining := totalH - statusH - logH - projectsH
-
-		var issuesH, detailH int
-
-		issuesCollapsed := 7 // 5 items + 2 borders
-
-		switch {
-		case a.side == sideRight:
-			issuesH = issuesCollapsed
-			detailH = remaining - issuesH
-		case a.leftFocus == focusIssues:
-			detailH = 6
-			issuesH = remaining - detailH
-		case a.leftFocus == focusProjects:
-			issuesH = issuesCollapsed
-			detailH = remaining - issuesH
-		default:
-			issuesH = issuesCollapsed
-			detailH = remaining - issuesH
-		}
-
-		if issuesH < 3 {
-			issuesH = 3
-		}
-		if detailH < 3 {
-			detailH = 3
-		}
-
-		a.statusPanel.SetSize(w, statusH)
-		a.issuesList.SetSize(w, issuesH)
-		a.projectList.SetSize(w, projectsH)
-		a.detailView.SetSize(w, detailH)
-		a.logPanel.SetSize(w, logH)
-		a.panelSideW = w
-		a.panelStatusH = statusH
-		a.panelIssuesH = issuesH
-		a.panelProjectsH = projectsH
-		a.panelDetailH = detailH
-		a.panelLogH = logH
-		return
-	}
-
-	sideW := a.sideWidth()
-	mainW := a.width - sideW
-
-	statusH := 3
-	remaining := totalH - statusH
-
-	// Natural content heights (capped at remaining space).
-	issuesNat := a.issuesList.ContentHeight()
-	projectsNat := a.projectList.ContentHeight()
-	minH := 3 // minimum panel height
-
-	if issuesNat < minH {
-		issuesNat = minH
-	}
-	if projectsNat < minH {
-		projectsNat = minH
-	}
-
-	var issuesH, projectsH int
-
-	if issuesNat+projectsNat <= remaining {
-		// Both fit — give extra space to the focused panel.
-		extra := remaining - issuesNat - projectsNat
-		if a.leftFocus == focusProjects {
-			projectsH = projectsNat + extra
-			issuesH = issuesNat
-		} else {
-			issuesH = issuesNat + extra
-			projectsH = projectsNat
-		}
-	} else {
-		// Not enough space — focused panel gets remaining, other gets natural or min.
-		switch a.leftFocus {
-		case focusIssues:
-			projectsH = max(min(projectsNat, remaining/3), minH)
-			issuesH = remaining - projectsH
-		case focusProjects:
-			issuesH = max(min(issuesNat, remaining/3), minH)
-			projectsH = remaining - issuesH
-		default:
-			issuesH = remaining / 2
-			projectsH = remaining - issuesH
-		}
-	}
-
-	if issuesH < minH {
-		issuesH = minH
-	}
-	if projectsH < minH {
-		projectsH = minH
-	}
-
-	a.statusPanel.SetSize(sideW, statusH)
-	a.issuesList.SetSize(sideW, issuesH)
-	a.projectList.SetSize(sideW, projectsH)
-
-	// Right column: log fits content or max 8, detail gets the rest.
-	logH := 8
-	detailH := max(totalH-logH, 5)
-
-	a.detailView.SetSize(mainW, detailH)
-	a.logPanel.SetSize(mainW, logH)
-
-	// Cache sizes for mouse.
-	a.panelSideW = sideW
-	a.panelStatusH = statusH
-	a.panelIssuesH = issuesH
-	a.panelProjectsH = projectsH
-	a.panelDetailH = detailH
-	a.panelLogH = logH
-}
-
 func (a *App) updateFocusState() {
 	a.statusPanel.SetFocused(false)
 	a.issuesList.SetFocused(false)
@@ -1172,82 +787,3 @@ func (a *App) updateFocusState() {
 	a.layoutPanels()
 }
 
-// Commands.
-
-func fetchIssues(client *jira.Client, projectKey string) tea.Cmd {
-	return func() tea.Msg {
-		jql := fmt.Sprintf("project = %s ORDER BY updated DESC", projectKey)
-		result, err := client.SearchIssues(context.Background(), jql, 0, 50)
-		if err != nil {
-			return errorMsg{err: err}
-		}
-		return issuesLoadedMsg{issues: result.Issues}
-	}
-}
-
-// fetchFullIssue fetches issue + comments + changelog, returning the given message type.
-func fetchFullIssue(client *jira.Client, key string, mkMsg func(*jira.Issue) tea.Msg) tea.Cmd {
-	return func() tea.Msg {
-		issue, err := client.GetIssue(context.Background(), key)
-		if err != nil {
-			return mkMsg(nil)
-		}
-		comments, err := client.GetComments(context.Background(), key)
-		if err == nil {
-			issue.Comments = comments
-		}
-		changelog, err := client.GetChangelog(context.Background(), key)
-		if err == nil {
-			issue.Changelog = changelog
-		}
-		return mkMsg(issue)
-	}
-}
-
-func fetchIssueDetail(client *jira.Client, key string) tea.Cmd {
-	return fetchFullIssue(client, key, func(issue *jira.Issue) tea.Msg {
-		if issue == nil {
-			return errorMsg{err: fmt.Errorf("failed to fetch issue %s", key)}
-		}
-		return issueDetailLoadedMsg{issue: issue}
-	})
-}
-
-func fetchProjects(client *jira.Client) tea.Cmd {
-	return func() tea.Msg {
-		projects, err := client.GetProjects(context.Background())
-		if err != nil {
-			return errorMsg{err: err}
-		}
-		return projectsLoadedMsg{projects: projects}
-	}
-}
-
-func prefetchIssue(client *jira.Client, key string) tea.Cmd {
-	return fetchFullIssue(client, key, func(issue *jira.Issue) tea.Msg {
-		if issue == nil {
-			return nil // silent fail for prefetch
-		}
-		return issuePrefetchedMsg{issue: issue}
-	})
-}
-
-func fetchTransitions(client *jira.Client, issueKey string) tea.Cmd {
-	return func() tea.Msg {
-		transitions, err := client.GetTransitions(context.Background(), issueKey)
-		if err != nil {
-			return errorMsg{err: err}
-		}
-		return transitionsLoadedMsg{issueKey: issueKey, transitions: transitions}
-	}
-}
-
-func doTransition(client *jira.Client, key, transitionID string) tea.Cmd {
-	return func() tea.Msg {
-		err := client.DoTransition(context.Background(), key, transitionID)
-		if err != nil {
-			return errorMsg{err: err}
-		}
-		return transitionDoneMsg{}
-	}
-}

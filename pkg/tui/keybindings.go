@@ -8,19 +8,22 @@ type Binding struct {
 	Description string
 }
 
+func (a *App) bind(action Action, desc string) Binding {
+	return Binding{a.keymap.Keys(action), desc}
+}
+
 // ContextBindings returns keybindings for the current focus context.
-// Used both for the help bar (short) and the ? popup (full list).
 func (a *App) ContextBindings() []Binding {
-	// Global bindings always available.
+	km := a.keymap
 	global := []Binding{
-		{"q", "quit"},
-		{"tab", "switch left/right panels"},
-		{"1", "focus status panel"},
-		{"2", "focus issues panel"},
-		{"3", "focus projects panel"},
-		{"/", "search / filter current list"},
-		{"r", "refresh data from Jira"},
-		{"?", "show all keybindings"},
+		{km.Keys(ActQuit), "quit"},
+		{km.Keys(ActSwitchPanel), "switch left/right panels"},
+		{km.Keys(ActFocusStatus), "focus status panel"},
+		{km.Keys(ActFocusIssues), "focus issues panel"},
+		{km.Keys(ActFocusProj), "focus projects panel"},
+		{km.Keys(ActSearch), "search / filter current list"},
+		{km.Keys(ActRefresh), "refresh data from Jira"},
+		{km.Keys(ActHelp), "show all keybindings"},
 	}
 
 	switch {
@@ -29,24 +32,28 @@ func (a *App) ContextBindings() []Binding {
 			Binding{"j/k", "navigate up/down"},
 			Binding{"g/G", "go to top/bottom"},
 			Binding{"ctrl+d/u", "half-page down/up"},
-			Binding{"enter", "open issue detail (right panel)"},
-			Binding{"l", "open issue detail (right panel)"},
-			Binding{"t", "transition issue status"},
-			Binding{"o", "open issue in browser"},
-			Binding{"u", "open URL picker"},
+			a.bind(ActSelect, "select issue (mark active + open)"),
+			a.bind(ActOpen, "open issue detail"),
+			a.bind(ActFocusRight, "open issue detail"),
+			a.bind(ActTransition, "transition issue status"),
+			a.bind(ActBrowser, "open issue in browser"),
+			a.bind(ActURLPicker, "open URL picker"),
 			Binding{"[/]", "switch All/Assigned"},
 		)
 
 	case a.side == sideLeft && a.leftFocus == focusProjects:
 		return append(global,
 			Binding{"j/k", "navigate up/down"},
-			Binding{"enter", "select project and load issues"},
-			Binding{"l", "switch to detail panel"},
+			Binding{"g/G", "go to top/bottom"},
+			Binding{"ctrl+d/u", "half-page down/up"},
+			a.bind(ActSelect, "select project and load issues"),
+			a.bind(ActOpen, "preview project"),
+			a.bind(ActFocusRight, "switch to detail panel"),
 		)
 
 	case a.side == sideLeft && a.leftFocus == focusStatus:
 		return append(global,
-			Binding{"l", "switch to detail panel"},
+			a.bind(ActFocusRight, "switch to detail panel"),
 		)
 
 	case a.side == sideRight:
@@ -54,51 +61,47 @@ func (a *App) ContextBindings() []Binding {
 			Binding{"j/k", "scroll up/down"},
 			Binding{"ctrl+d/u", "half-page down/up"},
 			Binding{"[/]", "previous/next tab"},
-			Binding{"h", "back to left panel"},
-			Binding{"i", "jump to info tab"},
-			Binding{"o", "open in browser"},
-			Binding{"u", "open URL picker"},
+			a.bind(ActFocusLeft, "back to left panel"),
+			a.bind(ActInfoTab, "jump to info tab"),
+			a.bind(ActBrowser, "open in browser"),
+			a.bind(ActURLPicker, "open URL picker"),
 		)
 	}
 
 	return global
 }
 
-// HelpBarItems returns a short subset for the bottom help bar.
 func (a *App) helpBarItems() []components.HelpItem {
-	var items []components.HelpItem
-
+	km := a.keymap
 	switch {
 	case a.side == sideLeft && a.leftFocus == focusIssues:
-		items = []components.HelpItem{
+		return []components.HelpItem{
 			{Key: "j/k", Description: "navigate"},
-			{Key: "enter/l", Description: "open"},
-			{Key: "t", Description: "transition"},
-			{Key: "/", Description: "search"},
-			{Key: "?", Description: "help"},
+			{Key: km.Keys(ActSelect), Description: "select"},
+			{Key: km.Keys(ActOpen), Description: "open"},
+			{Key: km.Keys(ActTransition), Description: "transition"},
+			{Key: km.Keys(ActHelp), Description: "help"},
 		}
 	case a.side == sideLeft && a.leftFocus == focusProjects:
-		items = []components.HelpItem{
+		return []components.HelpItem{
 			{Key: "j/k", Description: "navigate"},
-			{Key: "enter", Description: "select"},
-			{Key: "/", Description: "search"},
-			{Key: "?", Description: "help"},
+			{Key: km.Keys(ActSelect), Description: "select"},
+			{Key: km.Keys(ActOpen), Description: "preview"},
+			{Key: km.Keys(ActHelp), Description: "help"},
 		}
 	case a.side == sideLeft && a.leftFocus == focusStatus:
-		items = []components.HelpItem{
-			{Key: "tab/l", Description: "detail"},
-			{Key: "?", Description: "help"},
+		return []components.HelpItem{
+			{Key: km.Keys(ActSwitchPanel) + "/" + km.Keys(ActFocusRight), Description: "detail"},
+			{Key: km.Keys(ActHelp), Description: "help"},
 		}
 	case a.side == sideRight:
-		items = []components.HelpItem{
+		return []components.HelpItem{
 			{Key: "j/k", Description: "scroll"},
 			{Key: "[/]", Description: "tabs"},
-			{Key: "h", Description: "back"},
-			{Key: "i", Description: "info"},
-			{Key: "?", Description: "help"},
+			{Key: km.Keys(ActFocusLeft), Description: "back"},
+			{Key: km.Keys(ActInfoTab), Description: "info"},
+			{Key: km.Keys(ActHelp), Description: "help"},
 		}
 	}
-
-	return items
+	return nil
 }
-

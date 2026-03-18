@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/textfuel/lazyjira/pkg/jira"
 	"github.com/textfuel/lazyjira/pkg/tui/components"
@@ -81,20 +82,10 @@ func (p *ProjectList) Update(msg tea.Msg) (*ProjectList, tea.Cmd) {
 		return p, nil
 	}
 	if msg, ok := msg.(tea.KeyMsg); ok {
-		switch msg.String() {
-		case "enter", " ":
-			if p.Cursor >= 0 && p.Cursor < len(p.projects) {
-				selected := p.projects[p.Cursor]
+		if p.KeyNav(msg.String()) {
+			if proj := p.SelectedProject(); proj != nil {
 				return p, func() tea.Msg {
-					return ProjectSelectedMsg{ProjectKey: selected.Key}
-				}
-			}
-		default:
-			if p.KeyNav(msg.String()) {
-				if proj := p.SelectedProject(); proj != nil {
-					return p, func() tea.Msg {
-						return ProjectHoveredMsg{Project: proj}
-					}
+					return ProjectHoveredMsg{Project: proj}
 				}
 			}
 		}
@@ -103,6 +94,14 @@ func (p *ProjectList) Update(msg tea.Msg) (*ProjectList, tea.Cmd) {
 }
 
 func (p *ProjectList) View() string {
+	if p.Height <= 1 {
+		footer := ""
+		if n := len(p.projects); n > 0 {
+			footer = fmt.Sprintf("%d projects", n)
+		}
+		return components.RenderCollapsedBar("[3] Projects", footer, p.Width, p.Focused)
+	}
+
 	contentWidth, innerHeight := components.PanelDimensions(p.Width, p.Height)
 
 	var rows []string
@@ -124,15 +123,20 @@ func (p *ProjectList) View() string {
 			namePart = namePart[:maxName-1] + "…"
 		}
 		active := proj.Key == p.activeKey
-		marker := " "
+		markerChar := " "
 		if active {
-			marker = "*"
+			markerChar = "*"
 		}
 
-		line := fmt.Sprintf("%s%-8s %s%s", marker, proj.Key, namePart, lead)
-		if i == p.Cursor && p.Focused {
+		line := fmt.Sprintf("%s%-8s %s%s", markerChar, proj.Key, namePart, lead)
+		switch {
+		case i == p.Cursor && p.Focused:
 			rows = append(rows, p.theme.SelectedItem.Width(contentWidth).Render(line))
-		} else {
+		case active:
+			coloredMarker := lipgloss.NewStyle().Foreground(theme.ColorGreen).Render(markerChar)
+			rest := fmt.Sprintf("%-8s %s%s", proj.Key, namePart, lead)
+			rows = append(rows, p.theme.NormalItem.Width(contentWidth).Render(coloredMarker+rest))
+		default:
 			rows = append(rows, p.theme.NormalItem.Width(contentWidth).Render(line))
 		}
 	}

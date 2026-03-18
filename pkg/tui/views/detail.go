@@ -55,6 +55,11 @@ type ExpandBlockMsg struct {
 	Lines []string
 }
 
+// NavigateIssueMsg is sent when user activates a block linked to a Jira issue.
+type NavigateIssueMsg struct {
+	Key string
+}
+
 type DetailView struct {
 	issue      *jira.Issue
 	project    *jira.Project
@@ -63,9 +68,9 @@ type DetailView struct {
 	activeTab  DetailTab
 	scrollY    int
 	listCursor int
-	blocks        [][]string
-	lastClickTime time.Time
-	lastClickIdx  int
+	blocks    [][]string
+	blockKeys []string // issue key per block (empty if not navigable)
+	dblClick  components.DblClickDetector
 	width         int
 	height     int
 	focused    bool
@@ -265,19 +270,12 @@ func (d *DetailView) ClickItem(relY int) tea.Cmd {
 		}
 		blockEnd := linePos + displayH
 		if clickedLine >= linePos && clickedLine < blockEnd {
-			now := time.Now()
-			// Double-click: same item within 500ms → expand if truncated.
-			if i == d.lastClickIdx && now.Sub(d.lastClickTime) < 500*time.Millisecond {
-				if len(block) > maxBlockLines {
-					d.lastClickTime = time.Time{}
-					return func() tea.Msg {
-						return ExpandBlockMsg{Title: "Details", Lines: block}
-					}
+			d.listCursor = i
+			if d.dblClick.Click(i) && len(block) > maxBlockLines {
+				return func() tea.Msg {
+					return ExpandBlockMsg{Title: "Details", Lines: block}
 				}
 			}
-			d.listCursor = i
-			d.lastClickIdx = i
-			d.lastClickTime = now
 			return nil
 		}
 		linePos = blockEnd + 1
@@ -341,6 +339,7 @@ func (d *DetailView) ListCursorDown() {
 	}
 }
 
+//nolint:gocognit // tab+key routing is inherently branchy
 func (d *DetailView) Update(msg tea.Msg) (*DetailView, tea.Cmd) {
 	if !d.focused {
 		return d, nil
@@ -393,8 +392,15 @@ func (d *DetailView) Update(msg tea.Msg) (*DetailView, tea.Cmd) {
 				}
 			}
 		case "enter", " ":
-			// Expand selected block if it's truncated.
 			if d.IsListTab() && d.listCursor >= 0 && d.listCursor < len(d.blocks) {
+				// Navigate to linked issue if block has an associated key.
+				if d.listCursor < len(d.blockKeys) && d.blockKeys[d.listCursor] != "" {
+					key := d.blockKeys[d.listCursor]
+					return d, func() tea.Msg {
+						return NavigateIssueMsg{Key: key}
+					}
+				}
+				// Otherwise expand selected block if it's truncated.
 				block := d.blocks[d.listCursor]
 				if len(block) > maxBlockLines {
 					return d, func() tea.Msg {
@@ -467,8 +473,9 @@ func (d *DetailView) View() string {
 			d.listCursor = 0
 		}
 
-		// Store full blocks for expand.
+		// Store full blocks for expand + navigation keys.
 		d.blocks = blocks
+		d.blockKeys = d.buildBlockKeys(blocks)
 
 		// Flatten blocks — truncate long ones, blue bar on selected.
 		bar := lipgloss.NewStyle().Foreground(theme.ColorBlue).Render("▎")
@@ -533,9 +540,10 @@ func (d *DetailView) View() string {
 		}
 	}
 
-	// Apply scroll for text tabs.
-	if d.scrollY > len(contentLines) {
-		d.scrollY = len(contentLines)
+	// Apply scroll for text tabs — don't scroll past the last line.
+	maxScroll := max(len(contentLines)-visible, 0)
+	if d.scrollY > maxScroll {
+		d.scrollY = maxScroll
 	}
 	if d.scrollY < 0 {
 		d.scrollY = 0
@@ -611,16 +619,79 @@ func (d *DetailView) buildTitle(maxWidth int) string {
 
 func (d *DetailView) renderDescription(width int) []string {
 	valStyle := d.theme.ValueStyle
-	lines := make([]string, 0, 16)
 
 	desc := d.issue.Description
 	if desc == "" {
 		desc = "(no description)"
 	}
-	for _, line := range wrapText(desc, width-2) {
+	wrapped := wrapText(desc, width-2)
+	styled := colorURLsWrapped(wrapped)
+	lines := make([]string, 0, len(styled))
+	for _, line := range styled {
 		lines = append(lines, " "+colorMentions(valStyle.Render(line)))
 	}
 	return lines
+}
+
+var urlStyle = lipgloss.NewStyle().Foreground(theme.ColorCyan).Underline(true)
+
+// colorURLs highlights http/https URLs in a single line with underlined cyan.
+func colorURLs(s string) string {
+	result := s
+	for _, prefix := range []string{"https://", "http://"} {
+		for {
+			start := strings.Index(result, prefix)
+			if start == -1 {
+				break
+			}
+			rest := result[start:]
+			end := strings.IndexAny(rest, " \t\n")
+			if end == -1 {
+				end = len(rest)
+			}
+			rawURL := rest[:end]
+			colored := urlStyle.Render(rawURL)
+			result = result[:start] + colored + rest[end:]
+		}
+	}
+	return result
+}
+
+// colorURLsWrapped highlights URLs across wrapped lines. If a URL was split
+// by wrapText, the continuation on the next line is also highlighted.
+func colorURLsWrapped(lines []string) []string {
+	result := make([]string, len(lines))
+	urlCont := false
+	for i, line := range lines {
+		if urlCont {
+			// Previous line ended mid-URL — highlight continuation.
+			end := strings.IndexAny(line, " \t")
+			if end == -1 {
+				result[i] = urlStyle.Render(line)
+				urlCont = true
+				continue
+			}
+			result[i] = urlStyle.Render(line[:end]) + colorURLs(line[end:])
+		} else {
+			result[i] = colorURLs(line)
+		}
+		// Check if this line ends mid-URL (URL extends to end of line).
+		urlCont = lineEndsInURL(lines[i])
+	}
+	return result
+}
+
+// lineEndsInURL returns true if the raw line ends inside a URL.
+func lineEndsInURL(line string) bool {
+	lastURL := strings.LastIndex(line, "https://")
+	if idx := strings.LastIndex(line, "http://"); idx > lastURL {
+		lastURL = idx
+	}
+	if lastURL == -1 {
+		return false
+	}
+	// If no space after the URL start, it extends to end of line.
+	return !strings.ContainsAny(line[lastURL:], " \t")
 }
 
 // colorMentions replaces \x00MENTION:@Name\x00 markers with colored author names.
@@ -642,6 +713,37 @@ func colorMentions(s string) string {
 		result = result[:start] + colored + after
 	}
 	return result
+}
+
+// buildBlockKeys returns an issue key per block for navigable tabs (subtasks, links).
+func (d *DetailView) buildBlockKeys(blocks [][]string) []string {
+	keys := make([]string, len(blocks))
+	switch d.activeTab { //nolint:exhaustive // only subtasks and links have navigable keys
+	case TabSubtasks:
+		for i, sub := range d.issue.Subtasks {
+			if i < len(keys) {
+				keys[i] = sub.Key
+			}
+		}
+	case TabLinks:
+		idx := 0
+		for _, link := range d.issue.IssueLinks {
+			if link.Type == nil {
+				continue
+			}
+			if link.OutwardIssue != nil || link.InwardIssue != nil {
+				if idx < len(keys) {
+					if link.OutwardIssue != nil {
+						keys[idx] = link.OutwardIssue.Key
+					} else if link.InwardIssue != nil {
+						keys[idx] = link.InwardIssue.Key
+					}
+				}
+				idx++
+			}
+		}
+	}
+	return keys
 }
 
 func (d *DetailView) renderSubtaskBlocks(width int) [][]string {
@@ -754,7 +856,9 @@ func (d *DetailView) renderHistoryBlocks(width int) [][]string {
 				}
 			}
 			changeLine := fmt.Sprintf("   %s: %s → %s", gray.Render(item.Field), from, to)
-			block = append(block, wrapText(changeLine, width-2)...)
+			for _, wl := range wrapText(changeLine, width-2) {
+				block = append(block, colorURLs(wl))
+			}
 		}
 
 		blocks = append(blocks, block)
@@ -771,7 +875,7 @@ func (d *DetailView) renderCommentBlocks(width int) [][]string {
 		if c.Author != nil {
 			author = c.Author.DisplayName
 		}
-		wrapped := wrapText(c.Body, width-2)
+		wrapped := colorURLsWrapped(wrapText(c.Body, width-2))
 		block := make([]string, 0, 1+len(wrapped))
 		block = append(block, " "+theme.AuthorRender(author)+" "+gray.Render(timeAgo(c.Created)))
 		for _, wl := range wrapped {

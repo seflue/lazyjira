@@ -16,6 +16,37 @@ type ScrollInfo struct {
 	Offset  int // scroll offset (first visible item index)
 }
 
+// RenderCollapsedBar draws a single-line collapsed panel: ╶─[title]───footer─╴
+func RenderCollapsedBar(title, footer string, width int, focused bool) string {
+	borderColor := theme.ColorNone
+	if focused {
+		borderColor = theme.ColorGreen
+	}
+	borderStyle := lipgloss.NewStyle().Foreground(borderColor)
+
+	var styledTitle string
+	if focused {
+		styledTitle = theme.Default.Title.Render(title)
+	} else {
+		styledTitle = borderStyle.Render(title)
+	}
+
+	titleLen := lipgloss.Width(styledTitle)
+	inner := max(width-2, 1) // space between ╶─ and ─╴
+
+	if footer == "" {
+		padding := max(inner-titleLen, 0)
+		return borderStyle.Render("╶─") + styledTitle + borderStyle.Render(strings.Repeat("─", padding)+"─╴")
+	}
+
+	styledFooter := borderStyle.Render(footer)
+	footerLen := lipgloss.Width(styledFooter)
+	padding := max(inner-titleLen-footerLen, 0)
+	return borderStyle.Render("╶─") + styledTitle +
+		borderStyle.Render(strings.Repeat("─", padding)) +
+		styledFooter + borderStyle.Render("─╴")
+}
+
 // RenderPanel draws a bordered panel with title in the top border.
 func RenderPanel(title, content string, width, innerHeight int, focused bool) string {
 	return RenderPanelFull(title, "", content, width, innerHeight, focused, nil)

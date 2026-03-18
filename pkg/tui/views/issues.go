@@ -42,7 +42,10 @@ func NewIssuesList() *IssuesList {
 }
 
 func (m *IssuesList) SetUserEmail(email string) { m.userEmail = email }
-func (m *IssuesList) SetActiveKey(key string)   { m.activeKey = key }
+func (m *IssuesList) SetActiveKey(key string) {
+	m.activeKey = key
+	m.applyFilterKeepCursor()
+}
 func (m *IssuesList) ClearActiveKey()            { m.activeKey = "" }
 
 func (m *IssuesList) NextTab() {
@@ -149,6 +152,18 @@ func (m *IssuesList) applyFilter() {
 		}
 		m.issues = filtered
 	}
+	// Pin active (selected) issue to top of the list.
+	if m.activeKey != "" {
+		for i, issue := range m.issues {
+			if issue.Key == m.activeKey {
+				if i > 0 {
+					m.issues[0], m.issues[i] = m.issues[i], m.issues[0]
+				}
+				break
+			}
+		}
+	}
+
 	m.Cursor = 0
 	m.Offset = 0
 	m.SetItemCount(len(m.issues))
@@ -183,6 +198,14 @@ func (m *IssuesList) Update(msg tea.Msg) (*IssuesList, tea.Cmd) {
 }
 
 func (m *IssuesList) View() string {
+	if m.Height <= 1 {
+		footer := ""
+		if n := len(m.issues); n > 0 {
+			footer = fmt.Sprintf("%d issues", n)
+		}
+		return components.RenderCollapsedBar(m.buildTitle(), footer, m.Width, m.Focused)
+	}
+
 	contentWidth, _ := components.PanelDimensions(m.Width, m.Height)
 	visible := m.VisibleRows()
 
@@ -274,16 +297,21 @@ func (m *IssuesList) renderIssueRow(issue jira.Issue, width int, selected bool) 
 	summary := components.TruncateEnd(issue.Summary, summaryWidth)
 
 	active := issue.Key == m.activeKey
-	marker := " "
+	markerChar := " "
 	if active {
-		marker = "*"
+		markerChar = "*"
 	}
 
+	line := fmt.Sprintf("%s%s %s %s", markerChar, paddedKey, emoji, summary)
 	if selected && m.Focused {
-		line := fmt.Sprintf("%s%s %s %s", marker, paddedKey, emoji, summary)
 		return m.theme.SelectedItem.Width(width).Render(line)
 	}
-	line := fmt.Sprintf("%s%s %s %s", marker, paddedKey, emoji, summary)
+	if active {
+		// Color only the marker in normal (non-selected) rows.
+		coloredMarker := lipgloss.NewStyle().Foreground(theme.ColorGreen).Render(markerChar)
+		rest := fmt.Sprintf("%s %s %s", paddedKey, emoji, summary)
+		return m.theme.NormalItem.Width(width).Render(coloredMarker + rest)
+	}
 	return m.theme.NormalItem.Width(width).Render(line)
 }
 
