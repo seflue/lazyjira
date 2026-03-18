@@ -28,7 +28,8 @@ type IssuesList struct {
 	allIssues   []jira.Issue
 	filter      string
 	tab         IssueTab
-	userEmail   string // for filtering "assigned to me"
+	userEmail   string
+	activeKey   string // the issue currently being viewed
 	keyColWidth int
 	cursor      int
 	offset      int
@@ -43,6 +44,8 @@ func NewIssuesList() *IssuesList {
 }
 
 func (m *IssuesList) SetUserEmail(email string) { m.userEmail = email }
+func (m *IssuesList) SetActiveKey(key string)   { m.activeKey = key }
+func (m *IssuesList) ClearActiveKey()            { m.activeKey = "" }
 
 func (m *IssuesList) NextTab() {
 	if m.tab == IssueTabAll {
@@ -152,7 +155,16 @@ func (m *IssuesList) applyFilter() {
 	m.offset = 0
 }
 
-func (m *IssuesList) SetSize(w, h int)       { m.width = w; m.height = h }
+func (m *IssuesList) SetSize(w, h int) { m.width = w; m.height = h }
+
+// ContentHeight returns natural height: items + 2 borders. Min 7 before data loads.
+func (m *IssuesList) ContentHeight() int {
+	h := len(m.issues) + 2
+	if h < 7 {
+		h = 7
+	}
+	return h
+}
 func (m *IssuesList) SetFocused(focused bool) { m.focused = focused }
 
 func (m *IssuesList) ScrollBy(delta int) {
@@ -239,13 +251,7 @@ func (m *IssuesList) visibleRows() int {
 }
 
 func (m *IssuesList) adjustOffset() {
-	visible := m.visibleRows()
-	if m.cursor < m.offset {
-		m.offset = m.cursor
-	}
-	if m.cursor >= m.offset+visible {
-		m.offset = m.cursor - visible + 1
-	}
+	m.offset = components.AdjustOffset(m.cursor, m.offset, m.visibleRows(), len(m.issues))
 }
 
 func (m *IssuesList) View() string {
@@ -270,7 +276,33 @@ func (m *IssuesList) View() string {
 	if len(m.issues) > 0 {
 		footer = fmt.Sprintf("%d of %d", m.cursor+1, len(m.issues))
 	}
-	return components.RenderPanelWithFooter(title, footer, content, m.width, visible, m.focused)
+	scroll := &components.ScrollInfo{Total: len(m.issues), Visible: visible, Offset: m.offset}
+	return components.RenderPanelFull(title, footer, content, m.width, visible, m.focused, scroll)
+}
+
+// ClickTabAt handles clicks on the title bar to switch All/Assigned tabs.
+func (m *IssuesList) ClickTabAt(x int) {
+	// Title: "[2] All - Assigned"
+	// "[2] " = 4 chars. "All" starts at 4, " - " at 7, "Assigned" at 10.
+	// Zone: x < midpoint → All, x >= midpoint → Assigned.
+	prefix := 4 // "[2] "
+	allW := 3   // "All"
+	sepW := 3   // " - "
+	mid := prefix + allW + sepW/2
+
+	if x >= prefix {
+		if x < mid {
+			if m.tab != IssueTabAll {
+				m.tab = IssueTabAll
+				m.applyFilter()
+			}
+		} else {
+			if m.tab != IssueTabAssigned {
+				m.tab = IssueTabAssigned
+				m.applyFilter()
+			}
+		}
+	}
 }
 
 func (m *IssuesList) buildTitle() string {
@@ -325,11 +357,17 @@ func (m *IssuesList) renderIssueRow(issue jira.Issue, width int, selected bool) 
 
 	summary := truncateRunes(issue.Summary, summaryWidth)
 
-	line := fmt.Sprintf(" %s %s %s", paddedKey, emoji, summary)
+	active := issue.Key == m.activeKey
+	marker := " "
+	if active {
+		marker = "*"
+	}
 
-	if selected {
+	if selected && m.focused {
+		line := fmt.Sprintf("%s%s %s %s", marker, paddedKey, emoji, summary)
 		return m.theme.SelectedItem.Width(width).Render(line)
 	}
+	line := fmt.Sprintf("%s%s %s %s", marker, paddedKey, emoji, summary)
 	return m.theme.NormalItem.Width(width).Render(line)
 }
 

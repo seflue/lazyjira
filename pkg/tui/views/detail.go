@@ -43,6 +43,14 @@ type SplashInfo struct {
 	Project    string
 }
 
+const maxBlockLines = 8 // max visible lines per entry before collapsing
+
+// ExpandBlockMsg is sent when user wants to expand a collapsed block.
+type ExpandBlockMsg struct {
+	Title string
+	Lines []string
+}
+
 type DetailView struct {
 	issue      *jira.Issue
 	project    *jira.Project
@@ -50,8 +58,11 @@ type DetailView struct {
 	mode       MainMode
 	activeTab  DetailTab
 	scrollY    int
-	listCursor int // cursor for list-based tabs (Sub, Cmt, Lnk, Hist)
-	width      int
+	listCursor int
+	blocks        [][]string
+	lastClickTime time.Time
+	lastClickIdx  int
+	width         int
 	height     int
 	focused    bool
 	theme      *theme.Theme
@@ -101,7 +112,13 @@ func (d *DetailView) SetSplash(info SplashInfo) {
 }
 
 func (d *DetailView) SetSize(w, h int)       { d.width = w; d.height = h }
-func (d *DetailView) SetFocused(focused bool) { d.focused = focused }
+func (d *DetailView) SetFocused(focused bool) {
+	if d.focused && !focused {
+		// Actually losing focus — reset list cursor.
+		d.listCursor = 0
+	}
+	d.focused = focused
+}
 func (d *DetailView) Init() tea.Cmd           { return nil }
 
 func (d *DetailView) NextTab() {
@@ -150,40 +167,119 @@ func (d *DetailView) ClickTab(x int) {
 	if d.issue == nil {
 		return
 	}
-	// Reconstruct tab labels and their positions in the title.
-	type tabPos struct {
-		tab   DetailTab
-		start int
-		end   int
-	}
 	labels := d.tabLabels()
-	prefix := fmt.Sprintf("[0] %s", d.issue.Key)
-	sep := " - "
-	pos := len(prefix) + len(sep)
-
-	var positions []tabPos
-	for i, tl := range labels {
-		end := pos + len(tl.label)
-		positions = append(positions, tabPos{tab: tl.tab, start: pos, end: end})
-		if i < len(labels)-1 {
-			pos = end + len(sep)
-		}
+	if len(labels) == 0 {
+		return
 	}
 
-	for _, p := range positions {
-		if x >= p.start && x < p.end {
-			d.activeTab = p.tab
+	// Tabs start after "[0] KEY" + " - " (the border char "╭" is col 0).
+	prefix := fmt.Sprintf("[0] %s", d.issue.Key)
+	sepW := 3 // " - "
+	tabsStart := len(prefix) + sepW
+
+	if x < tabsStart {
+		return
+	}
+
+	// Each tab owns from its start to the next tab's start (inclusive of separator).
+	pos := tabsStart
+	for i, tl := range labels {
+		labelW := len(tl.label)
+		var zoneEnd int
+		if i < len(labels)-1 {
+			zoneEnd = pos + labelW + sepW
+		} else {
+			zoneEnd = pos + labelW + 10 // last tab: generous zone
+		}
+		if x >= pos && x < zoneEnd {
+			d.activeTab = tl.tab
 			d.scrollY = 0
+			d.listCursor = 0
 			return
 		}
+		pos = zoneEnd
 	}
 }
 
 func (d *DetailView) ScrollBy(delta int) {
-	d.scrollY += delta
-	if d.scrollY < 0 {
-		d.scrollY = 0
+	if d.IsListTab() {
+		d.listCursor += delta
+		if d.listCursor < 0 {
+			d.listCursor = 0
+		}
+		if count := d.listTabItemCount(); d.listCursor >= count {
+			d.listCursor = count - 1
+		}
+		if d.listCursor < 0 {
+			d.listCursor = 0
+		}
+	} else {
+		d.scrollY += delta
+		if d.scrollY < 0 {
+			d.scrollY = 0
+		}
 	}
+}
+
+// ClickItem selects a list item. Double-click on truncated block expands it.
+// Returns an ExpandBlockMsg if double-click on truncated block, nil otherwise.
+func (d *DetailView) ClickItem(relY int) tea.Cmd {
+	if !d.IsListTab() || d.issue == nil {
+		return nil
+	}
+	// relY=0 is title bar, relY=1+ is content. Find which block the click falls in.
+	// We need to map content line to block index.
+	// Simple approach: the clicked line (accounting for scroll) maps to a block.
+	clickedLine := d.scrollY + relY - 1 // -1 for title border
+	if clickedLine < 0 {
+		return nil
+	}
+
+	// Walk blocks to find which one contains the clicked line.
+	var blocks [][]string
+	contentWidth := d.width - 2
+	if contentWidth < 10 {
+		contentWidth = 10
+	}
+	switch d.activeTab {
+	case TabSubtasks:
+		blocks = d.renderSubtaskBlocks(contentWidth)
+	case TabComments:
+		blocks = d.renderCommentBlocks(contentWidth)
+	case TabLinks:
+		blocks = d.renderLinkBlocks(contentWidth)
+	case TabHistory:
+		blocks = d.renderHistoryBlocks(contentWidth)
+	case TabInfo:
+		blocks = d.renderInfoBlocks(contentWidth)
+	}
+
+	linePos := 0
+	for i, block := range blocks {
+		displayH := len(block)
+		if displayH > maxBlockLines {
+			displayH = maxBlockLines + 1
+		}
+		blockEnd := linePos + displayH
+		if clickedLine >= linePos && clickedLine < blockEnd {
+			now := time.Now()
+			// Double-click: same item within 500ms → expand if truncated.
+			if i == d.lastClickIdx && now.Sub(d.lastClickTime) < 500*time.Millisecond {
+				if len(block) > maxBlockLines {
+					d.lastClickTime = time.Time{}
+					return func() tea.Msg {
+						return ExpandBlockMsg{Title: "Details", Lines: block}
+					}
+				}
+			}
+			d.listCursor = i
+			d.lastClickIdx = i
+			d.lastClickTime = now
+			return nil
+		}
+		linePos = blockEnd + 1
+	}
+	return nil
 }
 
 // listTabItemCount returns the number of items for list-based tabs, 0 for text tabs.
@@ -220,8 +316,24 @@ func (d *DetailView) infoFieldCount() int {
 	return count
 }
 
-func (d *DetailView) isListTab() bool {
-	return d.listTabItemCount() > 0
+func (d *DetailView) IsListTab() bool {
+	switch d.activeTab {
+	case TabSubtasks, TabComments, TabLinks, TabHistory, TabInfo:
+		return true
+	}
+	return false
+}
+
+func (d *DetailView) ListCursorUp() {
+	if d.listCursor > 0 {
+		d.listCursor--
+	}
+}
+
+func (d *DetailView) ListCursorDown() {
+	if count := d.listTabItemCount(); d.listCursor < count-1 {
+		d.listCursor++
+	}
 }
 
 func (d *DetailView) Update(msg tea.Msg) (*DetailView, tea.Cmd) {
@@ -274,6 +386,16 @@ func (d *DetailView) Update(msg tea.Msg) (*DetailView, tea.Cmd) {
 				d.scrollY -= d.visibleRows() / 2
 				if d.scrollY < 0 {
 					d.scrollY = 0
+				}
+			}
+		case "enter", " ":
+			// Expand selected block if it's truncated.
+			if d.IsListTab() && d.listCursor >= 0 && d.listCursor < len(d.blocks) {
+				block := d.blocks[d.listCursor]
+				if len(block) > maxBlockLines {
+					return d, func() tea.Msg {
+						return ExpandBlockMsg{Title: "Details", Lines: block}
+					}
 				}
 			}
 		}
@@ -349,16 +471,33 @@ func (d *DetailView) View() string {
 			d.listCursor = 0
 		}
 
-		// Flatten blocks with highlight on selected.
-		selectedBg := lipgloss.NewStyle().Background(lipgloss.Color("0")) // subtle highlight
+		// Store full blocks for expand.
+		d.blocks = blocks
+
+		// Flatten blocks — truncate long ones, blue bar on selected.
+		bar := lipgloss.NewStyle().Foreground(theme.ColorBlue).Render("▎")
+		ellipsis := lipgloss.NewStyle().Foreground(theme.ColorGray).Render("    ...")
 		sep := strings.Repeat("─", contentWidth-2)
 		for i, block := range blocks {
-			for _, line := range block {
-				if i == d.listCursor {
-					// Highlight: render with subtle bg.
-					contentLines = append(contentLines, selectedBg.Width(contentWidth).Render(line))
+			// Truncate long blocks.
+			displayBlock := block
+			truncated := false
+			if len(block) > maxBlockLines {
+				displayBlock = block[:maxBlockLines]
+				truncated = true
+			}
+			for _, line := range displayBlock {
+				if i == d.listCursor && d.focused {
+					contentLines = append(contentLines, bar+line)
 				} else {
-					contentLines = append(contentLines, line)
+					contentLines = append(contentLines, " "+line)
+				}
+			}
+			if truncated {
+				if i == d.listCursor && d.focused {
+					contentLines = append(contentLines, bar+ellipsis)
+				} else {
+					contentLines = append(contentLines, " "+ellipsis)
 				}
 			}
 			if i < len(blocks)-1 {
@@ -366,17 +505,28 @@ func (d *DetailView) View() string {
 			}
 		}
 
-		// Auto-scroll: find the line range of cursor block and ensure visible.
+		// Auto-scroll: account for truncated block sizes.
+		displayBlockHeight := func(block []string) int {
+			h := len(block)
+			if h > maxBlockLines {
+				h = maxBlockLines + 1 // +1 for "..."
+			}
+			return h
+		}
 		lineStart := 0
 		for i := 0; i < d.listCursor && i < len(blocks); i++ {
-			lineStart += len(blocks[i]) + 1 // +1 for separator
+			lineStart += displayBlockHeight(blocks[i]) + 1 // +1 for separator
 		}
-		if lineStart < d.scrollY {
-			d.scrollY = lineStart
+		margin := 1
+		if visible <= 3 {
+			margin = 0
 		}
-		blockEnd := lineStart + len(blocks[d.listCursor])
-		if blockEnd > d.scrollY+visible {
-			d.scrollY = blockEnd - visible
+		if lineStart-margin < d.scrollY {
+			d.scrollY = lineStart - margin
+		}
+		blockEnd := lineStart + displayBlockHeight(blocks[d.listCursor])
+		if blockEnd+margin > d.scrollY+visible {
+			d.scrollY = blockEnd + margin - visible
 		}
 	} else {
 		switch d.activeTab {
@@ -410,7 +560,9 @@ func (d *DetailView) View() string {
 	if count := d.listTabItemCount(); count > 0 {
 		footer = fmt.Sprintf("%d of %d", d.listCursor+1, count)
 	}
-	return components.RenderPanelWithFooter(title, footer, body, d.width, innerH, d.focused)
+	totalLines := len(contentLines)
+	scroll := &components.ScrollInfo{Total: totalLines, Visible: visible, Offset: d.scrollY}
+	return components.RenderPanelFull(title, footer, body, d.width, innerH, d.focused, scroll)
 }
 
 type tabLabel struct {
@@ -501,7 +653,8 @@ func (d *DetailView) renderSubtaskBlocks(width int) [][]string {
 	var blocks [][]string
 	for _, sub := range d.issue.Subtasks {
 		emoji := statusEmoji(sub.Status)
-		blocks = append(blocks, []string{fmt.Sprintf(" %s %s: %s", emoji, sub.Key, sub.Summary)})
+		line := fmt.Sprintf(" %s %s: %s", emoji, sub.Key, sub.Summary)
+		blocks = append(blocks, wrapText(line, width-2))
 	}
 	return blocks
 }
@@ -645,14 +798,14 @@ func (d *DetailView) renderLinkBlocks(width int) [][]string {
 		}
 		var block []string
 		if link.OutwardIssue != nil {
-			block = append(block, " "+
-				keyStyle.Render(link.Type.Outward)+" "+
-				valStyle.Render(fmt.Sprintf("%s: %s", link.OutwardIssue.Key, link.OutwardIssue.Summary)))
+			line := " " + keyStyle.Render(link.Type.Outward) + " " +
+				valStyle.Render(fmt.Sprintf("%s: %s", link.OutwardIssue.Key, link.OutwardIssue.Summary))
+			block = append(block, wrapText(line, width-2)...)
 		}
 		if link.InwardIssue != nil {
-			block = append(block, " "+
-				keyStyle.Render(link.Type.Inward)+" "+
-				valStyle.Render(fmt.Sprintf("%s: %s", link.InwardIssue.Key, link.InwardIssue.Summary)))
+			line := " " + keyStyle.Render(link.Type.Inward) + " " +
+				valStyle.Render(fmt.Sprintf("%s: %s", link.InwardIssue.Key, link.InwardIssue.Summary))
+			block = append(block, wrapText(line, width-2)...)
 		}
 		if len(block) > 0 {
 			blocks = append(blocks, block)
