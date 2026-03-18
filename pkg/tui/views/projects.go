@@ -23,7 +23,9 @@ type ProjectList struct {
 	projects    []jira.Project
 	allProjects []jira.Project
 	filter      string
+	activeKey   string // the project currently in use
 	cursor      int
+	offset      int
 	width       int
 	height      int
 	focused     bool
@@ -62,8 +64,37 @@ func (p *ProjectList) applyFilter() {
 }
 
 func (p *ProjectList) SetSize(w, h int)       { p.width = w; p.height = h }
+func (p *ProjectList) SetActiveKey(key string) { p.activeKey = key }
+
+func (p *ProjectList) ContentHeight() int {
+	h := len(p.projects) + 2
+	if h < 5 {
+		h = 5
+	}
+	return h
+}
 func (p *ProjectList) SetFocused(focused bool) { p.focused = focused }
+
+func (p *ProjectList) SelectedProject() *jira.Project {
+	if p.cursor >= 0 && p.cursor < len(p.projects) {
+		proj := p.projects[p.cursor]
+		return &proj
+	}
+	return nil
+}
 func (p *ProjectList) Init() tea.Cmd           { return nil }
+
+func (p *ProjectList) visibleRows() int {
+	rows := p.height - 2
+	if rows < 1 {
+		rows = 1
+	}
+	return rows
+}
+
+func (p *ProjectList) adjustOffset() {
+	p.offset = components.AdjustOffset(p.cursor, p.offset, p.visibleRows(), len(p.projects))
+}
 
 func (p *ProjectList) ScrollBy(delta int) {
 	p.cursor += delta
@@ -76,12 +107,14 @@ func (p *ProjectList) ScrollBy(delta int) {
 	if p.cursor < 0 {
 		p.cursor = 0
 	}
+	p.adjustOffset()
 }
 
 func (p *ProjectList) ClickAt(relY int) {
-	idx := relY - 1 // -1 for top border
+	idx := p.offset + relY - 1 // -1 for top border
 	if idx >= 0 && idx < len(p.projects) {
 		p.cursor = idx
+		p.adjustOffset()
 	}
 }
 
@@ -109,6 +142,7 @@ func (p *ProjectList) Update(msg tea.Msg) (*ProjectList, tea.Cmd) {
 				}
 			}
 		}
+		p.adjustOffset()
 		if prevCursor != p.cursor && p.cursor >= 0 && p.cursor < len(p.projects) {
 			proj := p.projects[p.cursor]
 			return p, func() tea.Msg {
@@ -130,10 +164,12 @@ func (p *ProjectList) View() string {
 	}
 
 	var rows []string
-	for i, proj := range p.projects {
-		if i >= innerHeight {
-			break
-		}
+	end := p.offset + innerHeight
+	if end > len(p.projects) {
+		end = len(p.projects)
+	}
+	for i := p.offset; i < end; i++ {
+		proj := p.projects[i]
 		lead := ""
 		if proj.Lead != nil {
 			lead = " · " + proj.Lead.DisplayName
@@ -149,10 +185,17 @@ func (p *ProjectList) View() string {
 		if len(namePart) > maxName {
 			namePart = namePart[:maxName-1] + "…"
 		}
-		line = fmt.Sprintf(" %-8s %s%s", proj.Key, namePart, lead)
-		if i == p.cursor {
+		active := proj.Key == p.activeKey
+		marker := " "
+		if active {
+			marker = "*"
+		}
+
+		if i == p.cursor && p.focused {
+			line = fmt.Sprintf("%s%-8s %s%s", marker, proj.Key, namePart, lead)
 			rows = append(rows, p.theme.SelectedItem.Width(contentWidth).Render(line))
 		} else {
+			line = fmt.Sprintf("%s%-8s %s%s", marker, proj.Key, namePart, lead)
 			rows = append(rows, p.theme.NormalItem.Width(contentWidth).Render(line))
 		}
 	}
@@ -162,5 +205,6 @@ func (p *ProjectList) View() string {
 	if len(p.projects) > 0 {
 		footer = fmt.Sprintf("%d of %d", p.cursor+1, len(p.projects))
 	}
-	return components.RenderPanelWithFooter("[3] Projects", footer, content, p.width, innerHeight, p.focused)
+	scroll := &components.ScrollInfo{Total: len(p.projects), Visible: innerHeight, Offset: p.offset}
+	return components.RenderPanelFull("[3] Projects", footer, content, p.width, innerHeight, p.focused, scroll)
 }

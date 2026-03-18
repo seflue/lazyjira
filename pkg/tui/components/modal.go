@@ -27,9 +27,11 @@ type Modal struct {
 	title   string
 	items   []ModalItem
 	cursor  int
-	visible bool
-	width   int
-	height  int
+	visible  bool
+	readOnly bool // scroll-only, no selection highlight
+	offset   int
+	width    int
+	height   int
 }
 
 func NewModal() Modal {
@@ -40,7 +42,18 @@ func (m *Modal) Show(title string, items []ModalItem) {
 	m.title = title
 	m.items = items
 	m.cursor = 0
+	m.offset = 0
 	m.visible = true
+	m.readOnly = false
+}
+
+func (m *Modal) ShowReadOnly(title string, items []ModalItem) {
+	m.title = title
+	m.items = items
+	m.cursor = 0
+	m.offset = 0
+	m.visible = true
+	m.readOnly = true
 }
 
 func (m *Modal) Hide()          { m.visible = false }
@@ -59,22 +72,74 @@ func (m *Modal) Update(msg tea.Msg) (Modal, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "j", "down":
-			if m.cursor < len(m.items)-1 {
+			if m.readOnly {
+				m.offset++
+			} else if m.cursor < len(m.items)-1 {
 				m.cursor++
 			}
 		case "k", "up":
-			if m.cursor > 0 {
+			if m.readOnly {
+				if m.offset > 0 {
+					m.offset--
+				}
+			} else if m.cursor > 0 {
 				m.cursor--
 			}
 		case "enter", " ":
+			if m.readOnly {
+				m.visible = false
+				return *m, func() tea.Msg { return ModalCancelledMsg{} }
+			}
 			if m.cursor >= 0 && m.cursor < len(m.items) {
 				selected := m.items[m.cursor]
 				m.visible = false
 				return *m, func() tea.Msg { return ModalSelectedMsg{Item: selected} }
 			}
-		case "esc", "q":
+		case "esc", "q", "h":
 			m.visible = false
 			return *m, func() tea.Msg { return ModalCancelledMsg{} }
+		}
+	case tea.MouseMsg:
+		switch msg.Type {
+		case tea.MouseWheelDown:
+			if m.readOnly {
+				m.offset++
+			} else if m.cursor < len(m.items)-1 {
+				m.cursor++
+			}
+		case tea.MouseWheelUp:
+			if m.readOnly {
+				if m.offset > 0 {
+					m.offset--
+				}
+			} else if m.cursor > 0 {
+				m.cursor--
+			}
+		case tea.MouseLeft:
+			if !m.readOnly {
+				// Click on item: title=1 line + blank=1 line, items start at y offset ~2 from modal top.
+				// Approximate: map click Y to item index.
+				// Modal is centered, so we use relative positioning.
+				clickY := msg.Y
+				// Items start after title + blank (2 lines) + modal border (1) + centering offset.
+				// Simple approach: just select based on relative position in items area.
+				idx := clickY - 3 // rough: border + title + blank
+				if m.height > 0 {
+					// Adjust for centering.
+					modalH := len(m.items) + 5 // title + blank + items + blank + hint
+					if modalH > m.height-2 {
+						modalH = m.height - 2
+					}
+					topOffset := (m.height - modalH) / 2
+					idx = clickY - topOffset - 3
+				}
+				if idx >= 0 && idx < len(m.items) {
+					m.cursor = idx
+					selected := m.items[m.cursor]
+					m.visible = false
+					return *m, func() tea.Msg { return ModalSelectedMsg{Item: selected} }
+				}
+			}
 		}
 	}
 	return *m, nil
@@ -89,17 +154,10 @@ func (m *Modal) View() string {
 		Foreground(lipgloss.Color("2")).
 		Bold(true)
 
-	dimStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("8"))
-
 	internalStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
 
 	// Calculate content width from longest item.
 	contentW := lipgloss.Width(m.title) + 2
-	hint := "enter: select | esc: cancel"
-	if w := len(hint) + 2; w > contentW {
-		contentW = w
-	}
 	for _, item := range m.items {
 		if w := lipgloss.Width(item.Label) + 2; w > contentW {
 			contentW = w
@@ -113,7 +171,41 @@ func (m *Modal) View() string {
 		contentW = maxW
 	}
 
-	// Build lines with items padded to full width.
+	if m.readOnly {
+		contentW = m.width - 2
+		if contentW < 10 {
+			contentW = 10
+		}
+
+		// Collect item lines only (title is in panel border).
+		var lines []string
+		for _, item := range m.items {
+			lines = append(lines, " "+item.Label)
+		}
+		totalLines := len(lines)
+		visibleH := m.height - 2
+		if visibleH < 3 {
+			visibleH = 3
+		}
+		if m.offset > totalLines-visibleH {
+			m.offset = totalLines - visibleH
+		}
+		if m.offset < 0 {
+			m.offset = 0
+		}
+		scrolled := lines
+		if m.offset < len(scrolled) {
+			scrolled = scrolled[m.offset:]
+		}
+		if len(scrolled) > visibleH {
+			scrolled = scrolled[:visibleH]
+		}
+		content := strings.Join(scrolled, "\n")
+		return RenderPanelFull(m.title, "", content, m.width, visibleH, true,
+			&ScrollInfo{Total: totalLines, Visible: visibleH, Offset: m.offset})
+	}
+
+	// Normal modal (selection) — no hints, title + blank + items.
 	var lines []string
 	lines = append(lines, " "+titleStyle.Render(m.title))
 	lines = append(lines, "")
@@ -129,14 +221,13 @@ func (m *Modal) View() string {
 		}
 	}
 
-	lines = append(lines, "")
-	lines = append(lines, " "+dimStyle.Render(hint))
-
-	content := strings.Join(lines, "\n")
-
 	popupH := len(lines)
-	if popupH > m.height-4 {
-		popupH = m.height - 4
+	maxH := m.height - 2
+	if maxH < 5 {
+		maxH = 5
+	}
+	if popupH > maxH {
+		popupH = maxH
 	}
 
 	return lipgloss.NewStyle().
@@ -144,5 +235,5 @@ func (m *Modal) View() string {
 		BorderForeground(lipgloss.Color("2")).
 		Width(contentW).
 		Height(popupH).
-		Render(content)
+		Render(strings.Join(lines, "\n"))
 }

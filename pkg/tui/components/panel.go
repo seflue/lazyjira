@@ -1,6 +1,7 @@
 package components
 
 import (
+	"math"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -8,14 +9,25 @@ import (
 	"github.com/cockroach-eater/lazyjira/pkg/tui/theme"
 )
 
-// RenderPanel draws a bordered panel with a title in the top border
-// and an optional footer in the bottom border (like lazygit's "1 of 25").
-func RenderPanel(title, content string, width, innerHeight int, focused bool) string {
-	return RenderPanelWithFooter(title, "", content, width, innerHeight, focused)
+// ScrollInfo provides data for rendering a scrollbar in the right border.
+type ScrollInfo struct {
+	Total   int // total items/lines
+	Visible int // visible items/lines
+	Offset  int // scroll offset (first visible item index)
 }
 
-// RenderPanelWithFooter draws a panel with title (top border) and footer (bottom-right border).
+// RenderPanel draws a bordered panel with title in the top border.
+func RenderPanel(title, content string, width, innerHeight int, focused bool) string {
+	return RenderPanelFull(title, "", content, width, innerHeight, focused, nil)
+}
+
+// RenderPanelWithFooter draws a panel with title and footer.
 func RenderPanelWithFooter(title, footer, content string, width, innerHeight int, focused bool) string {
+	return RenderPanelFull(title, footer, content, width, innerHeight, focused, nil)
+}
+
+// RenderPanelFull draws a panel with title, footer, and optional scrollbar.
+func RenderPanelFull(title, footer, content string, width, innerHeight int, focused bool, scroll *ScrollInfo) string {
 	th := theme.DefaultTheme()
 
 	borderColor := theme.ColorNone
@@ -37,7 +49,7 @@ func RenderPanelWithFooter(title, footer, content string, width, innerHeight int
 
 	borderStyle := lipgloss.NewStyle().Foreground(borderColor)
 
-	// Top border: ╭Title──────────╮
+	// Top border.
 	titleLen := lipgloss.Width(styledTitle)
 	topPadding := contentWidth - titleLen
 	if topPadding < 0 {
@@ -56,18 +68,55 @@ func RenderPanelWithFooter(title, footer, content string, width, innerHeight int
 		lines = lines[:innerHeight]
 	}
 
+	// Compute scrollbar — same algorithm as lazygit's gocui.
+	showScroll := scroll != nil && scroll.Total > scroll.Visible && innerHeight > 0
+	var thumbStart, thumbEnd int
+	if showScroll {
+		listSize := scroll.Total
+		pageSize := scroll.Visible
+		position := scroll.Offset
+		scrollArea := innerHeight
+
+		// Thumb height proportional to visible/total.
+		thumbH := int(float64(pageSize) / float64(listSize) * float64(scrollArea))
+		if thumbH < 1 {
+			thumbH = 1
+		}
+
+		// Thumb position — snap to bottom at end.
+		maxPos := listSize - pageSize
+		if maxPos <= 0 {
+			thumbStart = 0
+		} else if position >= maxPos {
+			thumbStart = scrollArea - thumbH
+		} else {
+			thumbStart = int(math.Ceil(float64(position) / float64(maxPos) * float64(scrollArea-thumbH-1)))
+		}
+
+		thumbEnd = thumbStart + thumbH
+		if thumbEnd > scrollArea {
+			thumbEnd = scrollArea
+		}
+	}
+
 	borderVert := borderStyle.Render("│")
+	thumbChar := borderStyle.Render("▐")
 	var body strings.Builder
-	for _, line := range lines {
+	for i, line := range lines {
 		rendered := line
 		lineWidth := lipgloss.Width(rendered)
 		if lineWidth < contentWidth {
 			rendered += strings.Repeat(" ", contentWidth-lineWidth)
 		}
-		body.WriteString(borderVert + rendered + borderVert + "\n")
+		// Right border: scrollbar or normal.
+		rightBorder := borderVert
+		if showScroll && i >= thumbStart && i < thumbEnd {
+			rightBorder = thumbChar
+		}
+		body.WriteString(borderVert + rendered + rightBorder + "\n")
 	}
 
-	// Bottom border: ╰──────────1 of 25─╯
+	// Bottom border.
 	var bottomLine string
 	if footer != "" {
 		styledFooter := borderStyle.Render(footer)
