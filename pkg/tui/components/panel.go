@@ -21,11 +21,6 @@ func RenderPanel(title, content string, width, innerHeight int, focused bool) st
 	return RenderPanelFull(title, "", content, width, innerHeight, focused, nil)
 }
 
-// RenderPanelWithFooter draws a panel with title and footer.
-func RenderPanelWithFooter(title, footer, content string, width, innerHeight int, focused bool) string {
-	return RenderPanelFull(title, footer, content, width, innerHeight, focused, nil)
-}
-
 // RenderPanelFull draws a panel with title, footer, and optional scrollbar.
 func RenderPanelFull(title, footer, content string, width, innerHeight int, focused bool, scroll *ScrollInfo) string {
 	th := theme.DefaultTheme()

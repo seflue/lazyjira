@@ -18,7 +18,6 @@ const (
 type Theme struct {
 	Title          lipgloss.Style
 	Subtitle       lipgloss.Style
-	StatusBar      lipgloss.Style
 	HintBar        lipgloss.Style
 	SelectedItem   lipgloss.Style
 	NormalItem     lipgloss.Style
@@ -43,9 +42,6 @@ func DefaultTheme() *Theme {
 
 		Subtitle: lipgloss.NewStyle().
 			Foreground(ColorGray),
-
-		StatusBar: lipgloss.NewStyle().
-			Foreground(ColorWhite),
 
 		HintBar: lipgloss.NewStyle().
 			Foreground(ColorGray),

@@ -11,7 +11,6 @@ type Config struct {
 	Jira        JiraConfig        `yaml:"jira"`
 	Projects    []ProjectConfig   `yaml:"projects"`
 	GUI         GUIConfig         `yaml:"gui"`
-	Keybindings KeybindingsConfig `yaml:"keybindings"`
 	Cache       CacheConfig       `yaml:"cache"`
 	Refresh     RefreshConfig     `yaml:"refresh"`
 }
@@ -63,7 +62,6 @@ func DefaultConfig() *Config {
 				"key", "summary", "status", "priority", "assignee",
 			},
 		},
-		Keybindings: DefaultKeymap(),
 		Cache: CacheConfig{
 			Enabled: true,
 			TTL:     "5m",
