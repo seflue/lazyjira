@@ -1,0 +1,37 @@
+version: 2
+
+builds:
+  - main: ./cmd/lazyjira
+    binary: lazyjira
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+
+brews:
+  - repository:
+      owner: cockroach-eater
+      name: homebrew-tap
+    directory: Formula
+    homepage: "https://github.com/cockroach-eater/lazyjira"
+    description: "Terminal UI for Jira"
+    license: "MIT"
+    test: |
+      assert_match "lazyjira", shell_output("#{bin}/lazyjira --version")
+
+changelog:
+  sort: asc
