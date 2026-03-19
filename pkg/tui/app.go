@@ -438,7 +438,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							if key := a.extractIssueKey(u); key != "" {
 								items = append(items, components.ModalItem{ID: u, Label: key, Internal: true})
 							} else {
-								items = append(items, components.ModalItem{ID: u, Label: components.TruncateMiddle(u, 50)})
+								items = append(items, components.ModalItem{ID: u, Label: u})
 							}
 						}
 					}
@@ -754,24 +754,25 @@ func (a *App) renderHelpOverlay(base string) string {
 		}
 	}
 
+	popupW := min(maxKey+40, a.width-4)
+
 	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Bold(true)
-	descStyle := lipgloss.NewStyle()
 
 	lines := make([]string, 0, len(bindings)+3)
 	lines = append(lines, "")
+	descMaxW := popupW - maxKey - 6 // 2 left pad + 2 gap + 2 border
 	for _, b := range bindings {
 		padded := b.Key
 		for len(padded) < maxKey {
 			padded += " "
 		}
-		lines = append(lines, "  "+keyStyle.Render(padded)+"  "+descStyle.Render(b.Description))
+		desc := components.TruncateEnd(b.Description, descMaxW)
+		lines = append(lines, "  "+keyStyle.Render(padded)+"  "+desc)
 	}
 	lines = append(lines, "")
 	lines = append(lines, "  "+lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render("press any key to close"))
 
 	popupContent := strings.Join(lines, "\n")
-
-	popupW := min(maxKey+40, a.width-4)
 	popupH := min(len(lines), a.height-4)
 
 	popup := lipgloss.NewStyle().
