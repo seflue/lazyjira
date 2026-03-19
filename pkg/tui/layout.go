@@ -90,47 +90,19 @@ func (a *App) layoutPanels() {
 	statusH := 3
 	remaining := totalH - statusH
 
-	// Natural content heights (capped at remaining space).
-	issuesNat := a.issuesList.ContentHeight()
-	projectsNat := a.projectList.ContentHeight()
-	minH := 3  // minimum panel height
-	maxIssuesH := 12 // 10 items + 2 borders
-
-	if issuesNat < minH {
-		issuesNat = minH
-	}
-	if issuesNat > maxIssuesH {
-		issuesNat = maxIssuesH
-	}
-	if projectsNat < minH {
-		projectsNat = minH
-	}
-
 	var issuesH, projectsH int
+	minH := 3
+	collapsedProjectsH := 5 // compact: 3 items visible (like log panel)
 
-	if issuesNat+projectsNat <= remaining {
-		// Both fit — give extra space to the focused panel.
-		extra := remaining - issuesNat - projectsNat
-		if a.leftFocus == focusProjects {
-			projectsH = projectsNat + extra
-			issuesH = issuesNat
-		} else {
-			issuesH = issuesNat + extra
-			projectsH = projectsNat
-		}
+	if a.leftFocus == focusProjects {
+		// Projects focused: give projects the space, issues gets compact.
+		issuesNat := max(min(a.issuesList.ContentHeight(), 12), minH)
+		issuesH = max(min(issuesNat, remaining/3), minH)
+		projectsH = remaining - issuesH
 	} else {
-		// Not enough space — focused panel gets remaining, other gets natural or min.
-		switch a.leftFocus {
-		case focusIssues:
-			projectsH = max(min(projectsNat, remaining/3), minH)
-			issuesH = remaining - projectsH
-		case focusProjects:
-			issuesH = max(min(issuesNat, remaining/3), minH)
-			projectsH = remaining - issuesH
-		default:
-			issuesH = remaining / 2
-			projectsH = remaining - issuesH
-		}
+		// Issues focused (or status): projects collapsed, issues gets space.
+		projectsH = collapsedProjectsH
+		issuesH = remaining - projectsH
 	}
 
 	if issuesH < minH {

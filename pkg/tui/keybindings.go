@@ -38,7 +38,7 @@ func (a *App) ContextBindings() []Binding {
 			a.bind(ActTransition, "transition issue status"),
 			a.bind(ActBrowser, "open issue in browser"),
 			a.bind(ActURLPicker, "open URL picker"),
-			Binding{"[/]", "switch All/Assigned"},
+			Binding{"[/]", "switch tab"},
 		)
 
 	case a.side == sideLeft && a.leftFocus == focusProjects:

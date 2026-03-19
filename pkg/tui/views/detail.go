@@ -2,12 +2,14 @@ package views
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/textfuel/lazyjira/pkg/config"
 	"github.com/textfuel/lazyjira/pkg/jira"
 	"github.com/textfuel/lazyjira/pkg/tui/components"
 	"github.com/textfuel/lazyjira/pkg/tui/theme"
@@ -61,21 +63,25 @@ type NavigateIssueMsg struct {
 }
 
 type DetailView struct {
-	issue      *jira.Issue
-	project    *jira.Project
-	splash     SplashInfo
-	mode       MainMode
-	activeTab  DetailTab
-	scrollY    int
-	listCursor int
-	blocks    [][]string
-	blockKeys []string // issue key per block (empty if not navigable)
-	dblClick  components.DblClickDetector
-	width         int
-	height     int
-	focused    bool
-	theme      *theme.Theme
+	issue        *jira.Issue
+	project      *jira.Project
+	splash       SplashInfo
+	mode         MainMode
+	activeTab    DetailTab
+	scrollY      int
+	listCursor   int
+	blocks       [][]string
+	blockKeys    []string // issue key per block (empty if not navigable)
+	dblClick     components.DblClickDetector
+	customFields []config.CustomFieldConfig
+	width        int
+	height       int
+	focused      bool
+	theme        *theme.Theme
 }
+
+// SetCustomFields sets the list of custom fields to display in the Info tab.
+func (d *DetailView) SetCustomFields(fields []config.CustomFieldConfig) { d.customFields = fields }
 
 func NewDetailView() *DetailView {
 	return &DetailView{theme: theme.Default, mode: ModeIssue}
@@ -315,6 +321,7 @@ func (d *DetailView) infoFieldCount() int {
 	if len(d.issue.Components) > 0 {
 		count++
 	}
+	count += len(d.customFields)
 	return count
 }
 
@@ -809,7 +816,47 @@ func (d *DetailView) renderInfoBlocks(width int) [][]string {
 		blocks = append(blocks, []string{fmt.Sprintf(" %-11s %s", "Components:", valStyle.Render(strings.Join(names, ", ")))})
 	}
 
+	// Custom fields.
+	for _, cf := range d.customFields {
+		val := formatCustomFieldValue(issue.CustomFields[cf.ID])
+		blocks = append(blocks, []string{fmt.Sprintf(" %-11s %s", cf.Name+":", valStyle.Render(val))})
+	}
+
 	return blocks
+}
+
+func formatCustomFieldValue(v any) string {
+	if v == nil {
+		return "None"
+	}
+	switch val := v.(type) {
+	case string:
+		return val
+	case float64:
+		if val == float64(int64(val)) {
+			return strconv.FormatInt(int64(val), 10)
+		}
+		return fmt.Sprintf("%.2f", val)
+	case map[string]any:
+		if name, ok := val["displayName"].(string); ok {
+			return name
+		}
+		if value, ok := val["value"].(string); ok {
+			return value
+		}
+		if name, ok := val["name"].(string); ok {
+			return name
+		}
+		return fmt.Sprintf("%v", val)
+	case []any:
+		var parts []string
+		for _, item := range val {
+			parts = append(parts, formatCustomFieldValue(item))
+		}
+		return strings.Join(parts, ", ")
+	default:
+		return fmt.Sprintf("%v", val)
+	}
 }
 
 // renderEntry renders a single author+time header + content block + separator.

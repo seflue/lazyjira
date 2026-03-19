@@ -58,9 +58,10 @@ type Issue struct {
 	Updated     time.Time   `json:"-"`
 	Subtasks    []Issue     `json:"-"`
 	IssueLinks  []IssueLink `json:"-"`
-	Comments    []Comment        `json:"-"`
-	Changelog   []ChangelogEntry `json:"-"`
-	Transitions []Transition     `json:"-"`
+	Comments     []Comment        `json:"-"`
+	Changelog    []ChangelogEntry `json:"-"`
+	Transitions  []Transition     `json:"-"`
+	CustomFields map[string]any   `json:"-"`
 }
 
 // ChangelogEntry represents a single change in issue history.

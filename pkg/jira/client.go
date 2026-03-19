@@ -41,13 +41,17 @@ type RequestLog struct {
 }
 
 type Client struct {
-	baseURL    string
-	authHeader string
-	httpClient *http.Client
-	dryRun     bool
-	logger     io.Writer
-	onRequest  func(RequestLog) // callback for TUI log panel
+	baseURL        string
+	authHeader     string
+	httpClient     *http.Client
+	dryRun         bool
+	logger         io.Writer
+	onRequest      func(RequestLog) // callback for TUI log panel
+	customFieldIDs []string
 }
+
+// SetCustomFields sets the list of custom field IDs to fetch from the API.
+func (c *Client) SetCustomFields(ids []string) { c.customFieldIDs = ids }
 
 // Compile-time check that Client implements ClientInterface.
 var _ ClientInterface = (*Client)(nil)
@@ -178,6 +182,9 @@ func (c *Client) GetIssue(ctx context.Context, issueKey string) (*Issue, error) 
 
 func (c *Client) SearchIssues(ctx context.Context, jql string, startAt, maxResults int) (*SearchResult, error) {
 	fields := "summary,description,status,priority,assignee,reporter,labels,components,sprint,issuetype,created,updated,subtasks,issuelinks"
+	if len(c.customFieldIDs) > 0 {
+		fields += "," + strings.Join(c.customFieldIDs, ",")
+	}
 	path := fmt.Sprintf("/search/jql?jql=%s&startAt=%d&maxResults=%d&fields=%s",
 		url.QueryEscape(jql), startAt, maxResults, fields)
 
@@ -394,24 +401,48 @@ func (c *Client) GetSprints(ctx context.Context, boardID int) ([]Sprint, error) 
 // Internal response types for proper JSON unmarshalling from Jira REST API v3.
 
 type issueResponse struct {
-	ID     string `json:"id"`
-	Key    string `json:"key"`
-	Fields struct {
-		Summary     string              `json:"summary"`
-		Description any         `json:"description"`
-		Status      *statusResponse     `json:"status"`
-		Priority    *Priority           `json:"priority"`
-		Assignee    *userResponse    `json:"assignee"`
-		Reporter    *userResponse    `json:"reporter"`
-		Labels      []string         `json:"labels"`
-		Components  []Component      `json:"components"`
-		Sprint      *Sprint          `json:"sprint"`
-		IssueType   *IssueType       `json:"issuetype"`
-		Created     JiraTime         `json:"created"`
-		Updated     JiraTime         `json:"updated"`
-		Subtasks    []issueResponse  `json:"subtasks"`
-		IssueLinks  []issueLinkResponse `json:"issuelinks"`
-	} `json:"fields"`
+	ID     string              `json:"id"`
+	Key    string              `json:"key"`
+	Fields issueFieldsResponse `json:"fields"`
+}
+
+type issueFieldsResponse struct {
+	Summary     string              `json:"summary"`
+	Description any                 `json:"description"`
+	Status      *statusResponse     `json:"status"`
+	Priority    *Priority           `json:"priority"`
+	Assignee    *userResponse       `json:"assignee"`
+	Reporter    *userResponse       `json:"reporter"`
+	Labels      []string            `json:"labels"`
+	Components  []Component         `json:"components"`
+	Sprint      *Sprint             `json:"sprint"`
+	IssueType   *IssueType          `json:"issuetype"`
+	Created     JiraTime            `json:"created"`
+	Updated     JiraTime            `json:"updated"`
+	Subtasks    []issueResponse     `json:"subtasks"`
+	IssueLinks  []issueLinkResponse `json:"issuelinks"`
+	RawExtra    map[string]json.RawMessage `json:"-"`
+}
+
+func (f *issueFieldsResponse) UnmarshalJSON(data []byte) error {
+	type Alias issueFieldsResponse
+	var alias Alias
+	if err := json.Unmarshal(data, &alias); err != nil {
+		return err
+	}
+	*f = issueFieldsResponse(alias)
+
+	var allFields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &allFields); err != nil {
+		return err
+	}
+	f.RawExtra = make(map[string]json.RawMessage)
+	for k, v := range allFields {
+		if strings.HasPrefix(k, "customfield_") {
+			f.RawExtra[k] = v
+		}
+	}
+	return nil
 }
 
 type statusResponse struct {
@@ -470,6 +501,16 @@ func (r *issueResponse) toIssue() Issue {
 	issue.IssueLinks = make([]IssueLink, len(r.Fields.IssueLinks))
 	for i, link := range r.Fields.IssueLinks {
 		issue.IssueLinks[i] = link.toIssueLink()
+	}
+
+	if len(r.Fields.RawExtra) > 0 {
+		issue.CustomFields = make(map[string]any)
+		for k, raw := range r.Fields.RawExtra {
+			var val any
+			if err := json.Unmarshal(raw, &val); err == nil && val != nil {
+				issue.CustomFields[k] = val
+			}
+		}
 	}
 
 	return issue

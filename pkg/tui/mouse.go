@@ -1,6 +1,10 @@
 package tui
 
-import tea "github.com/charmbracelet/bubbletea"
+import (
+	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/textfuel/lazyjira/pkg/jira"
+)
 
 type panelID int
 
@@ -129,8 +133,10 @@ func (a *App) mouseClick(panel panelID, relY int, x int) (tea.Model, tea.Cmd) {
 		a.leftFocus = focusIssues
 		a.updateFocusState()
 		if relY == 0 {
-			// Title bar — tab click (All / Assigned).
-			a.issuesList.ClickTabAt(x)
+			// Title bar — tab click.
+			if a.issuesList.ClickTabAt(x) && !a.issuesList.HasCachedTab() {
+				return a, a.fetchActiveTab()
+			}
 		} else if dbl := a.issuesList.ClickAt(relY); dbl {
 			// Double-click → open issue (same as Enter).
 			if sel := a.issuesList.SelectedIssue(); sel != nil {
@@ -154,11 +160,12 @@ func (a *App) mouseClick(panel panelID, relY int, x int) (tea.Model, tea.Cmd) {
 				a.statusPanel.SetProject(p.Key)
 				a.projectList.SetActiveKey(p.Key)
 				a.issuesList.ClearActiveKey()
+				a.issuesList.InvalidateTabCache()
+				a.issueCache = make(map[string]*jira.Issue)
 				a.leftFocus = focusIssues
 				a.updateFocusState()
-				*a.logFlag = true
 				go saveLastProject(p.Key)
-				return a, fetchIssues(a.client, a.projectKey)
+				return a, a.fetchActiveTab()
 			}
 		} else if p := a.projectList.SelectedProject(); p != nil {
 			a.detailView.SetProject(p)

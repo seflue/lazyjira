@@ -33,7 +33,10 @@ const (
 )
 
 // Async messages.
-type issuesLoadedMsg struct{ issues []jira.Issue }
+type issuesLoadedMsg struct {
+	issues []jira.Issue
+	tab    int // which tab index this fetch was for
+}
 type issueDetailLoadedMsg struct{ issue *jira.Issue }
 type transitionDoneMsg struct{}
 type errorMsg struct{ err error }
@@ -104,6 +107,10 @@ func NewAppWithAuth(cfg *config.Config, client *jira.Client, authMethod AuthMeth
 
 	statusPanel := views.NewStatusPanel(projectKey, cfg.Jira.Email, cfg.Jira.Host)
 	issuesList := views.NewIssuesList()
+	if len(cfg.GUI.IssueListFields) > 0 {
+		issuesList.SetFields(cfg.GUI.IssueListFields)
+	}
+	issuesList.SetTabs(cfg.IssueTabs)
 	issuesList.SetFocused(true)
 	issuesList.SetUserEmail(cfg.Jira.Email)
 	projectList := views.NewProjectList()
@@ -134,10 +141,19 @@ func NewAppWithAuth(cfg *config.Config, client *jira.Client, authMethod AuthMeth
 		Project:    projectKey,
 	}
 
+	if len(cfg.CustomFields) > 0 {
+		ids := make([]string, len(cfg.CustomFields))
+		for i, cf := range cfg.CustomFields {
+			ids[i] = cf.ID
+		}
+		client.SetCustomFields(ids)
+		detailView.SetCustomFields(cfg.CustomFields)
+	}
+
 	app := &App{
 		cfg:        cfg,
 		client:     client,
-		keymap:     DefaultKeymap(),
+		keymap:     KeymapFromConfig(cfg.Keybinding),
 		splashInfo: splash,
 		statusPanel: statusPanel,
 		issuesList:  issuesList,
@@ -160,8 +176,8 @@ func NewAppWithAuth(cfg *config.Config, client *jira.Client, authMethod AuthMeth
 func (a *App) Init() tea.Cmd {
 	var cmds []tea.Cmd
 	cmds = append(cmds, fetchProjects(a.client))
-	if a.projectKey != "" {
-		cmds = append(cmds, fetchIssues(a.client, a.projectKey))
+	if cmd := a.fetchActiveTab(); cmd != nil {
+		cmds = append(cmds, cmd)
 	}
 	// Start autofetch timer.
 	cmds = append(cmds, tea.Tick(30*time.Second, func(t time.Time) tea.Msg {
@@ -311,11 +327,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					a.statusPanel.SetProject(p.Key)
 					a.projectList.SetActiveKey(p.Key)
 					a.issuesList.ClearActiveKey()
+					a.issuesList.InvalidateTabCache()
+					a.issueCache = make(map[string]*jira.Issue)
 					a.leftFocus = focusIssues
 					a.updateFocusState()
-					*a.logFlag = true
 					go saveLastProject(p.Key)
-					return a, fetchIssues(a.client, a.projectKey)
+					return a, a.fetchActiveTab()
 				}
 				return a, nil
 			}
@@ -345,6 +362,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.detailView.PrevTab()
 			} else if a.side == sideLeft && a.leftFocus == focusIssues {
 				a.issuesList.PrevTab()
+				if !a.issuesList.HasCachedTab() {
+					return a, a.fetchActiveTab()
+				}
 			}
 			return a, nil
 		case ActNextTab:
@@ -352,6 +372,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.detailView.NextTab()
 			} else if a.side == sideLeft && a.leftFocus == focusIssues {
 				a.issuesList.NextTab()
+				if !a.issuesList.HasCachedTab() {
+					return a, a.fetchActiveTab()
+				}
 			}
 			return a, nil
 
@@ -437,11 +460,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 
 		case ActRefreshAll:
-			if a.projectKey != "" {
-				*a.logFlag = true
-				return a, fetchIssues(a.client, a.projectKey)
-			}
-			return a, nil
+			return a, a.fetchActiveTab()
 
 		default:
 			// ActInfoTab and nav keys are handled by the focused panel below.
@@ -449,8 +468,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case autoFetchTickMsg:
 		var fetchCmds []tea.Cmd
-		if a.projectKey != "" {
-			fetchCmds = append(fetchCmds, fetchIssues(a.client, a.projectKey))
+		if cmd := a.fetchActiveTab(); cmd != nil {
+			fetchCmds = append(fetchCmds, cmd)
 		}
 		// Schedule next tick.
 		fetchCmds = append(fetchCmds, tea.Tick(30*time.Second, func(t time.Time) tea.Msg {
@@ -462,11 +481,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.err = nil
 		*a.logFlag = false
 		a.statusPanel.SetOnline(true)
-		a.issueCache = make(map[string]*jira.Issue)
-		a.issuesList.SetIssues(msg.issues)
-		// Prefetch all issue details in background.
-		for _, issue := range msg.issues {
-			cmds = append(cmds, prefetchIssue(a.client, issue.Key))
+		a.issuesList.SetIssuesForTab(msg.tab, msg.issues)
+		// Only update display + prefetch if this is still the active tab.
+		if msg.tab == a.issuesList.GetTabIndex() {
+			a.issuesList.SetIssues(msg.issues)
+			// Prefetch details for all issues in this tab.
+			for _, issue := range msg.issues {
+				cmds = append(cmds, prefetchIssue(a.client, issue.Key))
+			}
 		}
 		return a, tea.Batch(cmds...)
 
@@ -495,12 +517,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case transitionDoneMsg:
-		if a.projectKey != "" {
-			var fetchCmds []tea.Cmd
-			fetchCmds = append(fetchCmds, fetchIssues(a.client, a.projectKey))
-			if sel := a.issuesList.SelectedIssue(); sel != nil {
-				fetchCmds = append(fetchCmds, fetchIssueDetail(a.client, sel.Key))
-			}
+		var fetchCmds []tea.Cmd
+		if cmd := a.fetchActiveTab(); cmd != nil {
+			fetchCmds = append(fetchCmds, cmd)
+		}
+		if sel := a.issuesList.SelectedIssue(); sel != nil {
+			fetchCmds = append(fetchCmds, fetchIssueDetail(a.client, sel.Key))
+		}
+		if len(fetchCmds) > 0 {
 			return a, tea.Batch(fetchCmds...)
 		}
 		return a, nil
@@ -590,7 +614,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.projectKey = projects[0].Key
 			a.statusPanel.SetProject(a.projectKey)
 			a.projectList.SetActiveKey(a.projectKey)
-			return a, fetchIssues(a.client, a.projectKey)
+			return a, a.fetchActiveTab()
 		}
 		return a, nil
 
@@ -752,6 +776,21 @@ func (a *App) renderHelpOverlay(base string) string {
 
 	// Center the popup over background.
 	return components.Overlay(base, popup, a.width, a.height)
+}
+
+// fetchActiveTab returns a command to fetch issues for the current active tab's JQL.
+func (a *App) fetchActiveTab() tea.Cmd {
+	if a.projectKey == "" {
+		return nil
+	}
+	tab := a.issuesList.ActiveTab()
+	if tab.JQL == "" {
+		return nil
+	}
+	tabIdx := a.issuesList.GetTabIndex()
+	jql := resolveTabJQL(tab, a.projectKey, a.cfg.Jira.Email)
+	*a.logFlag = true
+	return fetchIssuesByJQL(a.client, jql, tabIdx)
 }
 
 func (a *App) updateFocusState() {

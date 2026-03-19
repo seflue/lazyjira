@@ -1,8 +1,10 @@
 package tui
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"text/template"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -10,15 +12,31 @@ import (
 	"github.com/textfuel/lazyjira/pkg/jira"
 )
 
-func fetchIssues(client *jira.Client, projectKey string) tea.Cmd {
+func fetchIssuesByJQL(client *jira.Client, jql string, tab int) tea.Cmd {
 	return func() tea.Msg {
-		jql := fmt.Sprintf("project = %s ORDER BY updated DESC", projectKey)
 		result, err := client.SearchIssues(context.Background(), jql, 0, 50)
 		if err != nil {
 			return errorMsg{err: err}
 		}
-		return issuesLoadedMsg{issues: result.Issues}
+		return issuesLoadedMsg{issues: result.Issues, tab: tab}
 	}
+}
+
+// resolveTabJQL applies template variables to a tab's JQL string.
+func resolveTabJQL(tab config.IssueTabConfig, projectKey, email string) string {
+	tmpl, err := template.New("jql").Parse(tab.JQL)
+	if err != nil {
+		return fmt.Sprintf("project = %s ORDER BY updated DESC", projectKey)
+	}
+	data := struct {
+		ProjectKey string
+		UserEmail  string
+	}{ProjectKey: projectKey, UserEmail: email}
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return fmt.Sprintf("project = %s ORDER BY updated DESC", projectKey)
+	}
+	return buf.String()
 }
 
 // fetchFullIssue fetches issue + comments + changelog, returning the given message type.

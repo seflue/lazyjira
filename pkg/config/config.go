@@ -8,11 +8,67 @@ import (
 )
 
 type Config struct {
-	Jira        JiraConfig        `yaml:"jira"`
-	Projects    []ProjectConfig   `yaml:"projects"`
-	GUI         GUIConfig         `yaml:"gui"`
-	Cache       CacheConfig       `yaml:"cache"`
-	Refresh     RefreshConfig     `yaml:"refresh"`
+	Jira         JiraConfig          `yaml:"jira"`
+	Projects     []ProjectConfig     `yaml:"projects"`
+	GUI          GUIConfig           `yaml:"gui"`
+	Keybinding   KeybindingConfig    `yaml:"keybinding"`
+	IssueTabs    []IssueTabConfig    `yaml:"issueTabs"`
+	Cache        CacheConfig         `yaml:"cache"`
+	Refresh      RefreshConfig       `yaml:"refresh"`
+	CustomFields []CustomFieldConfig `yaml:"customFields"`
+}
+
+type IssueTabConfig struct {
+	Name string `yaml:"name"`
+	JQL  string `yaml:"jql"` // supports {{.ProjectKey}}, {{.UserEmail}}
+}
+
+type CustomFieldConfig struct {
+	ID   string `yaml:"id"`   // e.g. "customfield_10015"
+	Name string `yaml:"name"` // display name, e.g. "Story Points"
+}
+
+type KeybindingConfig struct {
+	Universal UniversalKeys `yaml:"universal"`
+	Issues    IssueKeys     `yaml:"issues"`
+	Projects  ProjectKeys   `yaml:"projects"`
+	Detail    DetailKeys    `yaml:"detail"`
+}
+
+type UniversalKeys struct {
+	Quit        string `yaml:"quit"`
+	Help        string `yaml:"help"`
+	Search      string `yaml:"search"`
+	SwitchPanel string `yaml:"switchPanel"`
+	Refresh     string `yaml:"refresh"`
+	RefreshAll  string `yaml:"refreshAll"`
+	PrevTab     string `yaml:"prevTab"`
+	NextTab     string `yaml:"nextTab"`
+	FocusDetail string `yaml:"focusDetail"`
+	FocusStatus string `yaml:"focusStatus"`
+	FocusIssues string `yaml:"focusIssues"`
+	FocusProj   string `yaml:"focusProjects"`
+}
+
+type IssueKeys struct {
+	Select     string `yaml:"select"`
+	Open       string `yaml:"open"`
+	FocusRight string `yaml:"focusRight"`
+	Transition string `yaml:"transition"`
+	Browser    string `yaml:"browser"`
+	URLPicker  string `yaml:"urlPicker"`
+	CopyURL    string `yaml:"copyURL"`
+}
+
+type ProjectKeys struct {
+	Select     string `yaml:"select"`
+	Open       string `yaml:"open"`
+	FocusRight string `yaml:"focusRight"`
+}
+
+type DetailKeys struct {
+	FocusLeft string `yaml:"focusLeft"`
+	InfoTab   string `yaml:"infoTab"`
 }
 
 type JiraConfig struct {
@@ -59,9 +115,10 @@ func DefaultConfig() *Config {
 			Mouse:          true,
 			Borders:        "rounded",
 			IssueListFields: []string{
-				"key", "summary", "status", "priority", "assignee",
+				"key", "status", "summary",
 			},
 		},
+		IssueTabs: DefaultIssueTabs(),
 		Cache: CacheConfig{
 			Enabled: true,
 			TTL:     "5m",
@@ -70,6 +127,14 @@ func DefaultConfig() *Config {
 			AutoRefresh: true,
 			Interval:    "30s",
 		},
+	}
+}
+
+// DefaultIssueTabs returns the default issue tab configuration.
+func DefaultIssueTabs() []IssueTabConfig {
+	return []IssueTabConfig{
+		{Name: "All", JQL: "project = {{.ProjectKey}} AND statusCategory != Done ORDER BY updated DESC"},
+		{Name: "Assigned", JQL: "project = {{.ProjectKey}} AND assignee=currentUser() AND statusCategory != Done ORDER BY priority DESC, updated DESC"},
 	}
 }
 

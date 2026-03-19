@@ -3,10 +3,12 @@ package views
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/textfuel/lazyjira/pkg/config"
 	"github.com/textfuel/lazyjira/pkg/jira"
 	"github.com/textfuel/lazyjira/pkg/tui/components"
 	"github.com/textfuel/lazyjira/pkg/tui/theme"
@@ -15,13 +17,10 @@ import (
 type IssuesLoadedMsg struct{ Issues []jira.Issue }
 type IssueSelectedMsg struct{ Issue *jira.Issue }
 
-// IssueTab defines which subset of issues to show.
-type IssueTab int
-
-const (
-	IssueTabAll      IssueTab = iota
-	IssueTabAssigned
-)
+// TabSwitchedMsg is sent when the user switches issue tabs.
+type TabSwitchedMsg struct {
+	Tab config.IssueTabConfig
+}
 
 const statusOpen = "○"
 
@@ -30,10 +29,13 @@ type IssuesList struct {
 	issues      []jira.Issue
 	allIssues   []jira.Issue
 	filter      string
-	tab         IssueTab
+	tabs        []config.IssueTabConfig
+	tab         int // active tab index
+	tabCache    map[int][]jira.Issue // per-tab cached issues
 	userEmail   string
 	activeKey   string // the issue currently being viewed
 	keyColWidth int
+	fields      []string
 	theme       *theme.Theme
 }
 
@@ -41,23 +43,62 @@ func NewIssuesList() *IssuesList {
 	return &IssuesList{theme: theme.Default}
 }
 
-func (m *IssuesList) SetUserEmail(email string) { m.userEmail = email }
+func (m *IssuesList) SetFields(fields []string)             { m.fields = fields }
+func (m *IssuesList) SetTabs(tabs []config.IssueTabConfig)  { m.tabs = tabs }
+func (m *IssuesList) SetUserEmail(email string)              { m.userEmail = email }
+func (m *IssuesList) ActiveTab() config.IssueTabConfig {
+	if m.tab >= 0 && m.tab < len(m.tabs) {
+		return m.tabs[m.tab]
+	}
+	return config.IssueTabConfig{}
+}
 func (m *IssuesList) SetActiveKey(key string) {
 	m.activeKey = key
 	m.applyFilterKeepCursor()
 }
-func (m *IssuesList) ClearActiveKey()            { m.activeKey = "" }
+func (m *IssuesList) ClearActiveKey() { m.activeKey = "" }
 
 func (m *IssuesList) NextTab() {
-	if m.tab == IssueTabAll {
-		m.tab = IssueTabAssigned
-	} else {
-		m.tab = IssueTabAll
+	if len(m.tabs) == 0 {
+		return
 	}
+	m.tab = (m.tab + 1) % len(m.tabs)
+	m.loadFromCache()
+}
+
+func (m *IssuesList) PrevTab() {
+	if len(m.tabs) == 0 {
+		return
+	}
+	m.tab = (m.tab + len(m.tabs) - 1) % len(m.tabs)
+	m.loadFromCache()
+}
+
+// loadFromCache switches display to cached data for current tab, if available.
+func (m *IssuesList) loadFromCache() {
+	if m.tabCache != nil {
+		if cached, ok := m.tabCache[m.tab]; ok {
+			m.allIssues = cached
+			m.updateKeyColWidth(cached)
+			m.applyFilter()
+			return
+		}
+	}
+	// No cache — clear list, will be populated by fetch.
+	m.allIssues = nil
 	m.applyFilter()
 }
 
-func (m *IssuesList) PrevTab() { m.NextTab() }
+func (m *IssuesList) GetTabIndex() int { return m.tab }
+
+// SetTabIndex switches to the given tab and loads from cache if available.
+func (m *IssuesList) SetTabIndex(idx int) {
+	if idx < 0 || idx >= len(m.tabs) {
+		return
+	}
+	m.tab = idx
+	m.loadFromCache()
+}
 
 func (m *IssuesList) SetIssues(issues []jira.Issue) {
 	// Remember current selection to preserve position.
@@ -66,19 +107,51 @@ func (m *IssuesList) SetIssues(issues []jira.Issue) {
 		selectedKey = sel.Key
 	}
 
-	m.allIssues = issues
-	m.keyColWidth = 0
-	for _, issue := range issues {
-		if w := lipgloss.Width(issue.Key); w > m.keyColWidth {
-			m.keyColWidth = w
-		}
+	// Store in per-tab cache.
+	if m.tabCache == nil {
+		m.tabCache = make(map[int][]jira.Issue)
 	}
+	m.tabCache[m.tab] = issues
+
+	m.allIssues = issues
+	m.updateKeyColWidth(issues)
 	m.applyFilter()
 
 	// Restore cursor position.
 	if selectedKey != "" {
 		m.SelectByKey(selectedKey)
 	}
+}
+
+func (m *IssuesList) updateKeyColWidth(issues []jira.Issue) {
+	m.keyColWidth = 0
+	for _, issue := range issues {
+		if w := lipgloss.Width(issue.Key); w > m.keyColWidth {
+			m.keyColWidth = w
+		}
+	}
+}
+
+// HasCachedTab returns true if the current tab has cached data.
+func (m *IssuesList) HasCachedTab() bool {
+	if m.tabCache == nil {
+		return false
+	}
+	_, ok := m.tabCache[m.tab]
+	return ok
+}
+
+// SetIssuesForTab stores issues in the cache for a specific tab without updating the display.
+func (m *IssuesList) SetIssuesForTab(tab int, issues []jira.Issue) {
+	if m.tabCache == nil {
+		m.tabCache = make(map[int][]jira.Issue)
+	}
+	m.tabCache[tab] = issues
+}
+
+// InvalidateTabCache clears all cached tab data (e.g. on project switch).
+func (m *IssuesList) InvalidateTabCache() {
+	m.tabCache = nil
 }
 
 func (m *IssuesList) SetFilter(query string) {
@@ -115,27 +188,11 @@ func (m *IssuesList) SelectByKey(key string) bool {
 	return false
 }
 
-func (m *IssuesList) GetTab() IssueTab { return m.tab }
-
-func (m *IssuesList) SetTab(tab IssueTab) {
-	m.tab = tab
-	m.applyFilter()
-}
-
 func (m *IssuesList) applyFilter() {
-	// Start from all issues, apply tab filter first.
+	// With config-driven tabs, all tab filtering is server-side via JQL.
+	// Only apply text search filter client-side.
 	source := m.allIssues
-	if m.tab == IssueTabAssigned && m.userEmail != "" {
-		var assigned []jira.Issue
-		for _, issue := range source {
-			if issue.Assignee != nil && strings.EqualFold(issue.Assignee.Email, m.userEmail) {
-				assigned = append(assigned, issue)
-			}
-		}
-		source = assigned
-	}
 
-	// Then apply text search filter.
 	if m.filter == "" {
 		m.issues = source
 	} else {
@@ -225,76 +282,87 @@ func (m *IssuesList) View() string {
 	return components.RenderPanelFull(title, footer, content, m.Width, visible, m.Focused, scroll)
 }
 
-// ClickTabAt handles clicks on the title bar to switch All/Assigned tabs.
-func (m *IssuesList) ClickTabAt(x int) {
-	// Title: "[2] All - Assigned"
-	// "[2] " = 4 chars. "All" starts at 4, " - " at 7, "Assigned" at 10.
-	// Zone: x < midpoint → All, x >= midpoint → Assigned.
-	prefix := 4 // "[2] "
-	allW := 3   // "All"
-	sepW := 3   // " - "
-	mid := prefix + allW + sepW/2
-
-	if x >= prefix {
-		if x < mid {
-			if m.tab != IssueTabAll {
-				m.tab = IssueTabAll
-				m.applyFilter()
-			}
-		} else {
-			if m.tab != IssueTabAssigned {
-				m.tab = IssueTabAssigned
-				m.applyFilter()
-			}
-		}
+// ClickTabAt handles clicks on the title bar to switch tabs.
+// Returns true if the tab actually changed.
+func (m *IssuesList) ClickTabAt(x int) bool {
+	if len(m.tabs) == 0 {
+		return false
 	}
+	prefix := 4 // "[2] "
+	sepW := 3   // " - "
+	pos := prefix
+	for i, t := range m.tabs {
+		labelW := len(t.Name)
+		var zoneEnd int
+		if i < len(m.tabs)-1 {
+			zoneEnd = pos + labelW + sepW
+		} else {
+			zoneEnd = pos + labelW + 10 // generous zone for last tab
+		}
+		if x >= pos && x < zoneEnd {
+			if m.tab != i {
+				m.tab = i
+				m.applyFilter()
+				return true
+			}
+			return false
+		}
+		pos = zoneEnd
+	}
+	return false
 }
 
 func (m *IssuesList) buildTitle() string {
-	active := lipgloss.NewStyle().Foreground(theme.ColorGreen).Bold(true)
-	inactive := lipgloss.NewStyle().Foreground(theme.ColorWhite)
+	activeStyle := lipgloss.NewStyle().Foreground(theme.ColorGreen).Bold(true)
+	inactiveStyle := lipgloss.NewStyle().Foreground(theme.ColorWhite)
 	sep := lipgloss.NewStyle().Foreground(theme.ColorGray).Render(" - ")
 
-	// Count assigned issues.
-	assignedCount := 0
-	for _, issue := range m.allIssues {
-		if issue.Assignee != nil && strings.EqualFold(issue.Assignee.Email, m.userEmail) {
-			assignedCount++
+	if len(m.tabs) == 0 {
+		return "[2] Issues"
+	}
+
+	var parts []string
+	for i, t := range m.tabs {
+		if i == m.tab {
+			parts = append(parts, activeStyle.Render(t.Name))
+		} else {
+			parts = append(parts, inactiveStyle.Render(t.Name))
 		}
 	}
-
-	allLabel := "All"
-	assignedLabel := "Assigned"
-
-	if m.tab == IssueTabAll {
-		allLabel = active.Render(allLabel)
-		assignedLabel = inactive.Render(assignedLabel)
-	} else {
-		allLabel = inactive.Render(allLabel)
-		assignedLabel = active.Render(assignedLabel)
-	}
-
-	return "[2] " + allLabel + sep + assignedLabel
+	return "[2] " + strings.Join(parts, sep)
 }
 
 func (m *IssuesList) renderIssueRow(issue jira.Issue, width int, selected bool) string {
-	key := issue.Key
-
-	var emoji string
-	if selected {
-		emoji = statusEmojiPlain(issue.Status)
-	} else {
-		emoji = statusEmoji(issue.Status)
+	fields := m.fields
+	if len(fields) == 0 {
+		fields = []string{"key", "status", "summary"}
 	}
 
-	// Pad key to fixed column width.
-	keyPad := max(m.keyColWidth-lipgloss.Width(key), 0)
-	paddedKey := key + strings.Repeat(" ", keyPad)
-
-	separators := 4 // leading space + space after key + space after emoji + trailing
-	summaryWidth := max(width-m.keyColWidth-1-separators, 5)
-
-	summary := components.TruncateEnd(issue.Summary, summaryWidth)
+	// Calculate fixed column widths.
+	// Line format: marker(1) + field1 + " " + field2 + " " + ...
+	fixedWidth := 1 // active marker char
+	if len(fields) > 1 {
+		fixedWidth += len(fields) - 1 // spaces between fields
+	}
+	for _, f := range fields {
+		switch f {
+		case "key":
+			fixedWidth += m.keyColWidth
+		case "status":
+			fixedWidth += 1 // single emoji char
+		case "priority":
+			fixedWidth += 8
+		case "assignee":
+			fixedWidth += 12
+		case "type":
+			fixedWidth += 10
+		case "updated":
+			fixedWidth += 8
+		case "summary":
+			// elastic — calculated after
+		}
+	}
+	summaryWidth := max(width-fixedWidth, 5)
 
 	active := issue.Key == m.activeKey
 	markerChar := " "
@@ -302,17 +370,79 @@ func (m *IssuesList) renderIssueRow(issue jira.Issue, width int, selected bool) 
 		markerChar = "*"
 	}
 
-	line := fmt.Sprintf("%s%s %s %s", markerChar, paddedKey, emoji, summary)
+	var parts []string
+	for _, f := range fields {
+		switch f {
+		case "key":
+			parts = append(parts, padRight(issue.Key, m.keyColWidth))
+		case "summary":
+			parts = append(parts, components.TruncateEnd(issue.Summary, summaryWidth))
+		case "status":
+			if selected {
+				parts = append(parts, statusEmojiPlain(issue.Status))
+			} else {
+				parts = append(parts, statusEmoji(issue.Status))
+			}
+		case "priority":
+			name := ""
+			if issue.Priority != nil {
+				name = issue.Priority.Name
+			}
+			parts = append(parts, padRight(components.TruncateEnd(name, 8), 8))
+		case "assignee":
+			name := ""
+			if issue.Assignee != nil {
+				name = issue.Assignee.DisplayName
+			}
+			parts = append(parts, padRight(components.TruncateEnd(name, 12), 12))
+		case "type":
+			name := ""
+			if issue.IssueType != nil {
+				name = issue.IssueType.Name
+			}
+			parts = append(parts, padRight(components.TruncateEnd(name, 10), 10))
+		case "updated":
+			parts = append(parts, padRight(issueTimeAgo(issue.Updated), 8))
+		}
+	}
+	line := markerChar + strings.Join(parts, " ")
+
 	if selected && m.Focused {
 		return m.theme.SelectedItem.Width(width).Render(line)
 	}
 	if active {
-		// Color only the marker in normal (non-selected) rows.
 		coloredMarker := lipgloss.NewStyle().Foreground(theme.ColorGreen).Render(markerChar)
-		rest := fmt.Sprintf("%s %s %s", paddedKey, emoji, summary)
+		rest := strings.Join(parts, " ")
 		return m.theme.NormalItem.Width(width).Render(coloredMarker + rest)
 	}
 	return m.theme.NormalItem.Width(width).Render(line)
+}
+
+// padRight pads s with spaces to width w, using visible (ANSI-aware) width.
+func padRight(s string, w int) string {
+	vis := lipgloss.Width(s)
+	if vis >= w {
+		return s
+	}
+	return s + strings.Repeat(" ", w-vis)
+}
+
+// issueTimeAgo returns a short relative time string for the given timestamp.
+func issueTimeAgo(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	d := time.Since(t)
+	switch {
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	case d < 30*24*time.Hour:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	default:
+		return fmt.Sprintf("%dmo", int(d.Hours()/(24*30)))
+	}
 }
 
 // statusEmojiPlain returns uncolored status char for selected rows.

@@ -6,8 +6,6 @@ import (
 	"runtime"
 	"strings"
 	"time"
-
-	"github.com/textfuel/lazyjira/pkg/tui/views"
 )
 
 // showCachedIssue updates the detail view with the cached version of the given issue key.
@@ -47,9 +45,9 @@ func (a *App) navigateToIssue(key string) {
 		a.showCachedIssue(key)
 		return
 	}
-	// Switch to All tab and try again.
-	if a.issuesList.GetTab() != views.IssueTabAll {
-		a.issuesList.SetTab(views.IssueTabAll)
+	// Switch to first tab (typically "All") and try again.
+	if a.issuesList.GetTabIndex() != 0 {
+		a.issuesList.SetTabIndex(0)
 		if a.issuesList.SelectByKey(key) {
 			a.side = sideLeft
 			a.leftFocus = focusIssues

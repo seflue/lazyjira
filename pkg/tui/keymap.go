@@ -1,6 +1,10 @@
 package tui
 
-import "slices"
+import (
+	"slices"
+
+	"github.com/textfuel/lazyjira/pkg/config"
+)
 
 // Action represents a user-triggerable action.
 type Action string
@@ -58,6 +62,42 @@ func DefaultKeymap() Keymap {
 		ActRefreshAll:  {"R"},
 		ActInfoTab:     {"i"},
 	}
+}
+
+// KeymapFromConfig builds a Keymap starting from defaults and overriding
+// with any non-empty values from the user's keybinding config.
+func KeymapFromConfig(kcfg config.KeybindingConfig) Keymap {
+	km := DefaultKeymap()
+	set := func(action Action, val string) {
+		if val != "" {
+			km[action] = []string{val}
+		}
+	}
+	// Universal
+	set(ActQuit, kcfg.Universal.Quit)
+	set(ActHelp, kcfg.Universal.Help)
+	set(ActSearch, kcfg.Universal.Search)
+	set(ActSwitchPanel, kcfg.Universal.SwitchPanel)
+	set(ActRefresh, kcfg.Universal.Refresh)
+	set(ActRefreshAll, kcfg.Universal.RefreshAll)
+	set(ActPrevTab, kcfg.Universal.PrevTab)
+	set(ActNextTab, kcfg.Universal.NextTab)
+	set(ActFocusDetail, kcfg.Universal.FocusDetail)
+	set(ActFocusStatus, kcfg.Universal.FocusStatus)
+	set(ActFocusIssues, kcfg.Universal.FocusIssues)
+	set(ActFocusProj, kcfg.Universal.FocusProj)
+	// Issues (Select, Open, FocusRight are shared with Projects panel)
+	set(ActSelect, kcfg.Issues.Select)
+	set(ActOpen, kcfg.Issues.Open)
+	set(ActFocusRight, kcfg.Issues.FocusRight)
+	set(ActTransition, kcfg.Issues.Transition)
+	set(ActBrowser, kcfg.Issues.Browser)
+	set(ActURLPicker, kcfg.Issues.URLPicker)
+	set(ActCopyURL, kcfg.Issues.CopyURL)
+	// Detail
+	set(ActFocusLeft, kcfg.Detail.FocusLeft)
+	set(ActInfoTab, kcfg.Detail.InfoTab)
+	return km
 }
 
 // Match returns the action for the given key, or "" if none.
