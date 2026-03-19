@@ -1,6 +1,7 @@
 package components
 
 import (
+	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -11,8 +12,9 @@ import (
 type ModalItem struct {
 	ID        string
 	Label     string
-	Internal  bool // true = handled in-app (e.g. Jira issue), styled differently
-	Separator bool // true = non-selectable section header
+	Hint      string // shown below the list when this item is selected
+	Internal  bool   // true = handled in-app (e.g. Jira issue), styled differently
+	Separator bool   // true = non-selectable section header
 }
 
 // ModalSelectedMsg is sent when user picks an item.
@@ -69,6 +71,17 @@ func (m *Modal) moveCursor(delta int) {
 	}
 }
 
+// selectionContentW returns the content width for selection-mode modals.
+func (m *Modal) selectionContentW() int {
+	contentW := lipgloss.Width(m.title) + 2
+	for _, item := range m.items {
+		if w := lipgloss.Width(item.Label) + 2; w > contentW {
+			contentW = w
+		}
+	}
+	return min(contentW, min(55, m.width-6))
+}
+
 func (m *Modal) Hide()          { m.visible = false }
 func (m *Modal) IsVisible() bool { return m.visible }
 
@@ -113,42 +126,41 @@ func (m *Modal) Update(msg tea.Msg) (Modal, tea.Cmd) {
 			return *m, func() tea.Msg { return ModalCancelledMsg{} }
 		}
 	case tea.MouseMsg:
-		switch {
-		case msg.Button == tea.MouseButtonWheelDown:
-			if m.readOnly {
-				m.offset++
-			} else {
-				m.moveCursor(1)
+		return m.handleMouse(msg)
+	}
+	return *m, nil
+}
+
+func (m *Modal) handleMouse(msg tea.MouseMsg) (Modal, tea.Cmd) {
+	switch {
+	case msg.Button == tea.MouseButtonWheelDown:
+		if m.readOnly {
+			m.offset++
+		} else {
+			m.moveCursor(1)
+		}
+	case msg.Button == tea.MouseButtonWheelUp:
+		if m.readOnly {
+			if m.offset > 0 {
+				m.offset--
 			}
-		case msg.Button == tea.MouseButtonWheelUp:
-			if m.readOnly {
-				if m.offset > 0 {
-					m.offset--
-				}
-			} else {
-				m.moveCursor(-1)
+		} else {
+			m.moveCursor(-1)
+		}
+	case msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft:
+		if !m.readOnly {
+			clickY := msg.Y
+			idx := clickY - 3 // rough: border + title + blank
+			if m.height > 0 {
+				mainBoxH := min(len(m.items)+4, m.height-2) + 2 // content + borders
+				topOffset := (m.height - mainBoxH) / 2
+				idx = clickY - topOffset - 3
 			}
-		case msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft:
-			if !m.readOnly {
-				// Click on item: title=1 line + blank=1 line, items start at y offset ~2 from modal top.
-				// Approximate: map click Y to item index.
-				// Modal is centered, so we use relative positioning.
-				clickY := msg.Y
-				// Items start after title + blank (2 lines) + modal border (1) + centering offset.
-				// Simple approach: just select based on relative position in items area.
-				idx := clickY - 3 // rough: border + title + blank
-				if m.height > 0 {
-					// Adjust for centering.
-					modalH := min(len(m.items)+5, m.height-2) // title + blank + items + blank + hint
-					topOffset := (m.height - modalH) / 2
-					idx = clickY - topOffset - 3
-				}
-				if idx >= 0 && idx < len(m.items) && !m.items[idx].Separator {
-					m.cursor = idx
-					selected := m.items[m.cursor]
-					m.visible = false
-					return *m, func() tea.Msg { return ModalSelectedMsg{Item: selected} }
-				}
+			if idx >= 0 && idx < len(m.items) && !m.items[idx].Separator {
+				m.cursor = idx
+				selected := m.items[m.cursor]
+				m.visible = false
+				return *m, func() tea.Msg { return ModalSelectedMsg{Item: selected} }
 			}
 		}
 	}
@@ -167,13 +179,29 @@ func (m *Modal) View() string {
 	internalStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
 
 	if m.readOnly {
-		// Collect item lines only (title is in panel border).
+		// Collect item lines only.
 		var lines []string
 		for _, item := range m.items {
 			lines = append(lines, " "+item.Label)
 		}
+
+		// Auto-size width: fit content, max 70% of available width.
+		contentW := lipgloss.Width(m.title) + 2
+		for _, line := range lines {
+			if w := lipgloss.Width(line) + 2; w > contentW {
+				contentW = w
+			}
+		}
+		maxW := m.width * 7 / 10
+		if maxW < 40 {
+			maxW = min(m.width-4, 40)
+		}
+		if contentW > maxW {
+			contentW = maxW
+		}
+
 		totalLines := len(lines)
-		visibleH := max(m.height-2, 3)
+		visibleH := min(max(m.height-4, 3), totalLines)
 		if m.offset > totalLines-visibleH {
 			m.offset = totalLines - visibleH
 		}
@@ -188,23 +216,13 @@ func (m *Modal) View() string {
 			scrolled = scrolled[:visibleH]
 		}
 		content := strings.Join(scrolled, "\n")
-		return RenderPanelFull(m.title, "", content, m.width, visibleH, true,
+		return RenderPanelFull(m.title, "", content, contentW, visibleH, true,
 			&ScrollInfo{Total: totalLines, Visible: visibleH, Offset: m.offset})
 	}
 
-	// Calculate content width from longest item.
-	contentW := lipgloss.Width(m.title) + 2
-	for _, item := range m.items {
-		if w := lipgloss.Width(item.Label) + 2; w > contentW {
-			contentW = w
-		}
-	}
-	maxW := min(55, m.width-6)
-	if contentW > maxW {
-		contentW = maxW
-	}
+	contentW := m.selectionContentW()
 
-	// Normal modal (selection) — no hints, title + blank + items.
+	// Normal modal (selection): title + blank + items.
 	var lines []string
 	lines = append(lines, " "+titleStyle.Render(m.title))
 	lines = append(lines, "")
@@ -240,10 +258,75 @@ func (m *Modal) View() string {
 		popupH = maxH
 	}
 
+	// Count selectable items and cursor position among them.
+	total, pos := 0, 0
+	for i, item := range m.items {
+		if !item.Separator {
+			total++
+			if i == m.cursor {
+				pos = total
+			}
+		}
+	}
+	footer := fmt.Sprintf("%d of %d", pos, total)
+
+	// Pad lines to popupH.
+	for len(lines) < popupH {
+		lines = append(lines, "")
+	}
+	if len(lines) > popupH {
+		lines = lines[:popupH]
+	}
+
+	borderStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+	bv := borderStyle.Render("│")
+
+	// Top border.
+	topLine := borderStyle.Render("╭" + strings.Repeat("─", contentW) + "╮")
+
+	// Content lines with side borders.
+	var body strings.Builder
+	body.WriteString(topLine + "\n")
+	for _, line := range lines {
+		lineW := lipgloss.Width(line)
+		if lineW < contentW {
+			line += strings.Repeat(" ", contentW-lineW)
+		}
+		body.WriteString(bv + line + bv + "\n")
+	}
+
+	// Bottom border with footer counter.
+	footerStyled := borderStyle.Render(footer)
+	footerLen := lipgloss.Width(footerStyled)
+	pad := max(contentW-footerLen, 0)
+	bottomLine := borderStyle.Render("╰"+strings.Repeat("─", pad)) +
+		footerStyled +
+		borderStyle.Render("╯")
+	body.WriteString(bottomLine)
+
+	return body.String()
+}
+
+// HintView returns the hint box for the currently selected item, or "" if none.
+func (m *Modal) HintView() string {
+	if !m.visible || m.readOnly {
+		return ""
+	}
+	hint := ""
+	if m.cursor >= 0 && m.cursor < len(m.items) {
+		hint = m.items[m.cursor].Hint
+	}
+	if hint == "" {
+		return ""
+	}
+
+	contentW := m.selectionContentW()
+	const hintH = 2
+	hintContent := lipgloss.NewStyle().Width(contentW).Render(" " + hint)
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("2")).
+		BorderForeground(lipgloss.Color("7")).
 		Width(contentW).
-		Height(popupH).
-		Render(strings.Join(lines, "\n"))
+		Height(hintH).
+		Render(hintContent)
 }

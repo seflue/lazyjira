@@ -80,6 +80,7 @@ type ChangeItem struct {
 type Status struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
+	Description string `json:"description"`
 	CategoryKey string `json:"-"`
 }
 

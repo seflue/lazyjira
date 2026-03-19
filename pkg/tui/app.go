@@ -512,10 +512,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var items []components.ModalItem
 		for _, t := range msg.transitions {
 			label := t.Name
+			hint := ""
 			if t.To != nil {
 				label += " → " + t.To.Name
+				hint = t.To.Description
 			}
-			items = append(items, components.ModalItem{ID: t.ID, Label: label})
+			items = append(items, components.ModalItem{ID: t.ID, Label: label, Hint: hint})
 		}
 		a.modal.SetSize(a.width, a.height)
 		a.modal.Show("Transition: "+msg.issueKey, items)
@@ -552,13 +554,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for _, line := range msg.Lines {
 			items = append(items, components.ModalItem{ID: "", Label: line})
 		}
-		// Constrain modal to detail panel size (including borders).
-		modalW := a.width - a.panelSideW
-		modalH := a.panelDetailH
-		if a.isVerticalLayout() {
-			modalW = a.width
-		}
-		a.modal.SetSize(modalW, modalH)
+		a.modal.SetSize(a.width, a.height-1)
 		a.modal.ShowReadOnly(msg.Title, items)
 		return a, nil
 
@@ -648,21 +644,11 @@ func (a *App) View() string {
 
 	if a.isVerticalLayout() {
 		// Vertical: all stacked.
-		var detailArea string
-		if a.modal.IsVisible() {
-			detailH := max(a.height-1-3-5-3-5, 5) // rough: total - status - issues - projects - log
-			detailArea = lipgloss.Place(a.width, detailH,
-				lipgloss.Center, lipgloss.Center,
-				a.modal.View(),
-			)
-		} else {
-			detailArea = a.detailView.View()
-		}
 		content = lipgloss.JoinVertical(lipgloss.Left,
 			a.statusPanel.View(),
 			a.issuesList.View(),
 			a.projectList.View(),
-			detailArea,
+			a.detailView.View(),
 			a.logPanel.View(),
 		)
 	} else {
@@ -672,21 +658,8 @@ func (a *App) View() string {
 			a.projectList.View(),
 		)
 
-		var detailArea string
-		if a.modal.IsVisible() {
-			sideW := a.sideWidth()
-			mainW := a.width - sideW
-			detailH := max(a.height-1-8, 5)
-			popup := a.modal.View()
-			detailArea = lipgloss.Place(mainW, detailH,
-				lipgloss.Center, lipgloss.Center,
-				popup,
-			)
-		} else {
-			detailArea = a.detailView.View()
-		}
 		rightCol := lipgloss.JoinVertical(lipgloss.Left,
-			detailArea,
+			a.detailView.View(),
 			a.logPanel.View(),
 		)
 
@@ -712,12 +685,32 @@ func (a *App) View() string {
 	full := lipgloss.JoinVertical(lipgloss.Left, content, bottomBar)
 
 	// Overlays.
+	if a.modal.IsVisible() {
+		full = a.renderModalOverlay(full)
+	}
 	if a.showHelp {
 		full = a.renderHelpOverlay(full)
 	}
-	// Modal is rendered inline in the right column, not as overlay.
 
 	return full
+}
+
+func (a *App) renderModalOverlay(base string) string {
+	popup := a.modal.View()
+	popupLines := strings.Split(popup, "\n")
+	popupW := lipgloss.Width(popup)
+	popupH := len(popupLines)
+
+	x := (a.width - popupW) / 2
+	y := (a.height - popupH) / 2
+
+	result := components.OverlayAt(base, popup, x, y, a.width, a.height)
+
+	// Hint box: place right below the centered main modal.
+	if hint := a.modal.HintView(); hint != "" {
+		result = components.OverlayAt(result, hint, x, y+popupH, a.width, a.height)
+	}
+	return result
 }
 
 func (a *App) renderHelpOverlay(base string) string {
@@ -757,11 +750,8 @@ func (a *App) renderHelpOverlay(base string) string {
 		Height(popupH).
 		Render(popupContent)
 
-	// Center the popup.
-	return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Center, popup,
-		lipgloss.WithWhitespaceChars(" "),
-		lipgloss.WithWhitespaceForeground(lipgloss.Color("#000000")),
-	)
+	// Center the popup over background.
+	return components.Overlay(base, popup, a.width, a.height)
 }
 
 func (a *App) updateFocusState() {
