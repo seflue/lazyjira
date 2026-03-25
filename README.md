@@ -149,7 +149,13 @@ Press `?` inside the app for all keybindings.
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=textfuel/lazyjira&type=Date)](https://star-history.com/#textfuel/lazyjira&Date)
+<a href="https://www.star-history.com/?repos=textfuel%2Flazyjira&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/image?repos=textfuel/lazyjira&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/image?repos=textfuel/lazyjira&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/image?repos=textfuel/lazyjira&type=date&legend=top-left" />
+ </picture>
+</a>
 
 ## License
 
