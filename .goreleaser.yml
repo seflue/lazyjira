@@ -67,3 +67,8 @@ aurs:
 
 changelog:
   sort: asc
+
+release:
+  footer: |
+    ---
+    **Full changelog:** [CHANGELOG.md](https://github.com/textfuel/lazyjira/blob/main/CHANGELOG.md)
