@@ -7,6 +7,22 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [2.5.1] - 2026-03-28
+
+### Fixed
+
+- Arrow keys (up/down) now work for navigating filtered results during `/` search
+- Info panel: cursor stays on the selected element after confirming search with Enter (previously jumped to wrong item)
+
+### Added
+
+- Documentation: [Configuration](docs/Config.md), [Keybindings](docs/Keybindings.md), [Custom Fields](docs/Custom_Fields.md)
+- README: documentation links, expanded roadmap
+
+### Changed
+
+- Config: annotated unimplemented options with TODO markers (theme, language, mouse toggle, cache, auto-refresh, etc.)
+
 ## [2.5.0] - 2026-03-28
 
 ### Added
