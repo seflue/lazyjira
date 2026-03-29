@@ -7,6 +7,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-03-29
+
 ### Added
 
 - Jira Server and Data Center support (REST API v2) with automatic endpoint adaptation
@@ -162,7 +164,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Cross-platform: macOS, Linux, Windows
 - Homebrew install via tap
 
-[Unreleased]: https://github.com/textfuel/lazyjira/compare/v2.5.1...HEAD
+[Unreleased]: https://github.com/textfuel/lazyjira/compare/v2.6.0...HEAD
+[2.6.0]: https://github.com/textfuel/lazyjira/compare/v2.5.1...v2.6.0
 [2.5.1]: https://github.com/textfuel/lazyjira/compare/v2.5.0...v2.5.1
 [2.5.0]: https://github.com/textfuel/lazyjira/compare/v2.4.3...v2.5.0
 [2.4.3]: https://github.com/textfuel/lazyjira/compare/v2.4.2...v2.4.3
