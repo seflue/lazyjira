@@ -7,6 +7,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [2.6.1] - 2026-03-29
+
 ### Changed
 
 - Nix flake: switched from vendorHash to gomod2nix for reproducible builds
@@ -170,7 +172,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Cross-platform: macOS, Linux, Windows
 - Homebrew install via tap
 
-[Unreleased]: https://github.com/textfuel/lazyjira/compare/v2.6.0...HEAD
+[Unreleased]: https://github.com/textfuel/lazyjira/compare/v2.6.1...HEAD
+[2.6.1]: https://github.com/textfuel/lazyjira/compare/v2.6.0...v2.6.1
 [2.6.0]: https://github.com/textfuel/lazyjira/compare/v2.5.1...v2.6.0
 [2.5.1]: https://github.com/textfuel/lazyjira/compare/v2.5.0...v2.5.1
 [2.5.0]: https://github.com/textfuel/lazyjira/compare/v2.4.3...v2.5.0
