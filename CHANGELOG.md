@@ -7,6 +7,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [2.6.6] - 2026-03-30
+
 ### Fixed
 
 - Assignee list: current user now always appears first, matched by account ID instead of email. Fixes cases where Jira Cloud hides emails due to privacy settings (#16)
@@ -208,7 +210,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Cross-platform: macOS, Linux, Windows
 - Homebrew install via tap
 
-[Unreleased]: https://github.com/textfuel/lazyjira/compare/v2.6.5...HEAD
+[Unreleased]: https://github.com/textfuel/lazyjira/compare/v2.6.6...HEAD
+[2.6.6]: https://github.com/textfuel/lazyjira/compare/v2.6.5...v2.6.6
 [2.6.5]: https://github.com/textfuel/lazyjira/compare/v2.6.4...v2.6.5
 [2.6.4]: https://github.com/textfuel/lazyjira/compare/v2.6.3...v2.6.4
 [2.6.3]: https://github.com/textfuel/lazyjira/compare/v2.6.2...v2.6.3
