@@ -7,6 +7,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [2.6.5] - 2026-03-30
+
 ### Fixed
 
 - Search backspace now correctly deletes multi-byte Unicode characters instead of producing broken glyphs
@@ -195,7 +197,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Cross-platform: macOS, Linux, Windows
 - Homebrew install via tap
 
-[Unreleased]: https://github.com/textfuel/lazyjira/compare/v2.6.4...HEAD
+[Unreleased]: https://github.com/textfuel/lazyjira/compare/v2.6.5...HEAD
+[2.6.5]: https://github.com/textfuel/lazyjira/compare/v2.6.4...v2.6.5
 [2.6.4]: https://github.com/textfuel/lazyjira/compare/v2.6.3...v2.6.4
 [2.6.3]: https://github.com/textfuel/lazyjira/compare/v2.6.2...v2.6.3
 [2.6.2]: https://github.com/textfuel/lazyjira/compare/v2.6.1...v2.6.2
