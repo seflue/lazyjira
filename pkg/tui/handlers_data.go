@@ -33,7 +33,9 @@ func (a *App) handleIssuesLoaded(msg issuesLoadedMsg) (tea.Model, tea.Cmd) {
 			projects := a.projectList.AllProjects()
 			for _, p := range projects {
 				if strings.EqualFold(p.Key, projectKey) {
-					a.selectProject(&p)
+					if cmd := a.selectProject(&p); cmd != nil {
+						cmds = append(cmds, cmd)
+					}
 					cmds = append(cmds, a.fetchActiveTab())
 					a.gitDetectedKey = ""
 					return a, tea.Batch(cmds...)
@@ -147,6 +149,14 @@ func (a *App) handlePrioritiesLoaded(msg prioritiesLoadedMsg) (tea.Model, tea.Cm
 
 // handleUsersLoaded shows the assignee/reporter picker modal.
 func (a *App) handleUsersLoaded(msg usersLoadedMsg) (tea.Model, tea.Cmd) {
+	// Cache users for this project
+	if a.projectKey != "" && len(msg.users) > 0 {
+		a.usersCache[a.projectKey] = msg.users
+	}
+	// Prefetch only caches, no modal
+	if msg.issueKey == "" {
+		return a, nil
+	}
 	sel := a.issuesList.SelectedIssue()
 	if sel == nil {
 		return a, nil
@@ -155,20 +165,41 @@ func (a *App) handleUsersLoaded(msg usersLoadedMsg) (tea.Model, tea.Cmd) {
 	if sel.Assignee != nil {
 		currentAssigneeID = sel.Assignee.AccountID
 	}
+
+	myAccountID := ""
+	if a.currentUser != nil {
+		myAccountID = a.currentUser.AccountID
+	}
+
 	var items []components.ModalItem
+
+	// Put current user first
+	if a.currentUser != nil {
+		meLabel := a.currentUser.DisplayName + " (me)"
+		meFound := false
+		for _, u := range msg.users {
+			if u.AccountID == myAccountID {
+				items = append(items, components.ModalItem{ID: u.AccountID, Label: meLabel, Active: u.AccountID == currentAssigneeID})
+				meFound = true
+				break
+			}
+		}
+		if !meFound {
+			items = append(items, components.ModalItem{ID: a.currentUser.AccountID, Label: meLabel, Active: a.currentUser.AccountID == currentAssigneeID})
+		}
+	}
+
+	// Then unassigned option
 	items = append(items, components.ModalItem{ID: "", Label: "Unassigned", Active: currentAssigneeID == ""})
-	email := a.cfg.Jira.Email
+
+	// Then everyone else, skip current user since already added
 	for _, u := range msg.users {
-		if u.Email == email {
-			items = append(items, components.ModalItem{ID: u.AccountID, Label: u.DisplayName, Active: u.AccountID == currentAssigneeID})
-			break
+		if u.AccountID == myAccountID {
+			continue
 		}
+		items = append(items, components.ModalItem{ID: u.AccountID, Label: u.DisplayName, Active: u.AccountID == currentAssigneeID})
 	}
-	for _, u := range msg.users {
-		if u.Email != email {
-			items = append(items, components.ModalItem{ID: u.AccountID, Label: u.DisplayName, Active: u.AccountID == currentAssigneeID})
-		}
-	}
+
 	// onSelect callback set at fetch time (ActEditAssignee or editInfoField).
 	a.modal.Show("Assignee: "+sel.Key, items)
 	return a, nil

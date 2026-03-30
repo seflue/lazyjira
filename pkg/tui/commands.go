@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"text/template"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -66,15 +67,15 @@ func fetchIssuesByJQL(client jira.ClientInterface, jql string, tab int) tea.Cmd 
 func resolveTabJQL(tab config.IssueTabConfig, projectKey, email string) string {
 	tmpl, err := template.New("jql").Parse(tab.JQL)
 	if err != nil {
-		return fmt.Sprintf("project = %s ORDER BY updated DESC", projectKey)
+		return fmt.Sprintf("project = \"%s\" ORDER BY updated DESC", projectKey)
 	}
 	data := struct {
 		ProjectKey string
 		UserEmail  string
-	}{ProjectKey: projectKey, UserEmail: email}
+	}{ProjectKey: "\"" + projectKey + "\"", UserEmail: email}
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, data); err != nil {
-		return fmt.Sprintf("project = %s ORDER BY updated DESC", projectKey)
+		return fmt.Sprintf("project = \"%s\" ORDER BY updated DESC", projectKey)
 	}
 	return buf.String()
 }
@@ -198,6 +199,8 @@ func fetchJQLSuggestions(client jira.ClientInterface, fieldName, partial string)
 	}
 }
 
+type myselfLoadedMsg struct{ user *jira.User }
+
 type issueUpdatedMsg struct{ issueKey string }
 type commentAddedMsg struct{ issueKey string }
 type commentUpdatedMsg struct{ issueKey string }
@@ -249,6 +252,27 @@ func fetchPriorities(client jira.ClientInterface) tea.Cmd {
 		}
 		return prioritiesLoadedMsg{priorities: priorities}
 	}
+}
+
+func fetchMyself(client jira.ClientInterface) tea.Cmd {
+	return func() tea.Msg {
+		user, err := client.GetMyself(context.Background())
+		if err != nil {
+			return errorMsg{err: err}
+		}
+		return myselfLoadedMsg{user: user}
+	}
+}
+
+// prefetchUsersMsg triggers a background users fetch after a short delay
+type prefetchUsersMsg struct{ projectKey string }
+
+// prefetchUsers schedules a users fetch after a delay to avoid
+// hammering the API when the user switches projects quickly
+func prefetchUsers(projectKey string) tea.Cmd {
+	return tea.Tick(500*time.Millisecond, func(_ time.Time) tea.Msg {
+		return prefetchUsersMsg{projectKey: projectKey}
+	})
 }
 
 func fetchUsers(client jira.ClientInterface, projectKey, issueKey string) tea.Cmd {
