@@ -7,6 +7,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [2.7.0] - 2026-04-01
+
 ### Added
 
 - Create issues from TUI (n in issues panel, ctrl+n to duplicate): two-phase overlay with type picker and field form
@@ -242,7 +244,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Cross-platform: macOS, Linux, Windows
 - Homebrew install via tap
 
-[Unreleased]: https://github.com/textfuel/lazyjira/compare/v2.6.8...HEAD
+[Unreleased]: https://github.com/textfuel/lazyjira/compare/v2.7.0...HEAD
+[2.7.0]: https://github.com/textfuel/lazyjira/compare/v2.6.8...v2.7.0
 [2.6.8]: https://github.com/textfuel/lazyjira/compare/v2.6.7...v2.6.8
 [2.6.7]: https://github.com/textfuel/lazyjira/compare/v2.6.6...v2.6.7
 [2.6.6]: https://github.com/textfuel/lazyjira/compare/v2.6.5...v2.6.6
