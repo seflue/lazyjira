@@ -169,6 +169,7 @@ func (a *App) handleTabAction(action Action) (tea.Model, tea.Cmd, bool) {
 			if !a.issuesList.HasCachedTab() {
 				return a, a.fetchActiveTab(), true
 			}
+			a.previewSelectedIssue()
 		case a.side == sideLeft && a.leftFocus == focusInfo:
 			a.infoPanel.PrevTab()
 		}
@@ -183,6 +184,7 @@ func (a *App) handleTabAction(action Action) (tea.Model, tea.Cmd, bool) {
 			if !a.issuesList.HasCachedTab() {
 				return a, a.fetchActiveTab(), true
 			}
+			a.previewSelectedIssue()
 		case a.side == sideLeft && a.leftFocus == focusInfo:
 			a.infoPanel.NextTab()
 		}
@@ -336,18 +338,9 @@ func (a *App) startCreateIssue() (tea.Model, tea.Cmd) {
 	return a, fetchIssueTypes(a.client, a.projectID)
 }
 
-// handleActionSelect handles space/enter on the left panel.
-// Returns nil model on sideRight so the key falls through to the detail panel
+// handleActionSelect handles space on the info and projects panels
 func (a *App) handleActionSelect() (tea.Model, tea.Cmd) {
 	switch {
-	case a.side == sideLeft && a.leftFocus == focusIssues:
-		if sel := a.issuesList.SelectedIssue(); sel != nil {
-			a.issuesList.SetActiveKey(sel.Key)
-			a.side = sideRight
-			a.updateFocusState()
-			return a, fetchIssueDetail(a.client, sel.Key)
-		}
-		return a, nil
 	case a.side == sideLeft && a.leftFocus == focusInfo:
 		if a.infoPanel.ActiveTab() == views.InfoTabFields {
 			if sel := a.issuesList.SelectedIssue(); sel != nil {
@@ -374,28 +367,16 @@ func (a *App) handleActionSelect() (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 	case a.side == sideLeft && a.leftFocus == focusProjects:
-		if p := a.projectList.SelectedProject(); p != nil {
-			prefetch := a.selectProject(p)
-			a.leftFocus = focusIssues
-			a.updateFocusState()
-			return a, tea.Batch(a.fetchActiveTab(), prefetch)
-		}
-		return a, nil
+		return a.openProject()
 	}
 	return nil, nil
 }
 
-// handleActionOpen handles l/enter to preview without full select.
-// Returns nil model on sideRight so the key falls through to the detail panel
+// handleActionOpen handles enter on the left panel
 func (a *App) handleActionOpen() (tea.Model, tea.Cmd) {
 	switch {
 	case a.side == sideLeft && a.leftFocus == focusIssues:
-		if sel := a.issuesList.SelectedIssue(); sel != nil {
-			a.side = sideRight
-			a.updateFocusState()
-			return a, fetchIssueDetail(a.client, sel.Key)
-		}
-		return a, nil
+		return a.openIssueDetail()
 	case a.side == sideLeft && a.leftFocus == focusInfo:
 		if a.infoPanel.ActiveTab() == views.InfoTabFields {
 			if sel := a.issuesList.SelectedIssue(); sel != nil {
@@ -412,12 +393,28 @@ func (a *App) handleActionOpen() (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 	case a.side == sideLeft && a.leftFocus == focusProjects:
-		if p := a.projectList.SelectedProject(); p != nil {
-			a.detailView.SetProject(p)
-		}
-		return a, nil
+		return a.openProject()
 	}
 	return nil, nil
+}
+
+func (a *App) openIssueDetail() (tea.Model, tea.Cmd) {
+	if sel := a.issuesList.SelectedIssue(); sel != nil {
+		a.side = sideRight
+		a.updateFocusState()
+		return a, fetchIssueDetail(a.client, sel.Key)
+	}
+	return a, nil
+}
+
+func (a *App) openProject() (tea.Model, tea.Cmd) {
+	if p := a.projectList.SelectedProject(); p != nil {
+		prefetch := a.selectProject(p)
+		a.leftFocus = focusIssues
+		a.updateFocusState()
+		return a, tea.Batch(a.fetchActiveTab(), prefetch)
+	}
+	return a, nil
 }
 
 // infoPanelSelectedKey returns the issue key under cursor in Lnk/Sub tabs, or ""
