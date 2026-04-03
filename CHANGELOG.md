@@ -7,6 +7,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [2.7.2] - 2026-04-03
+
 ### Added
 
 - Edit custom fields in info panel. Supports select, multiselect, person, text and textarea
@@ -282,7 +284,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Cross-platform: macOS, Linux, Windows
 - Homebrew install via tap
 
-[Unreleased]: https://github.com/textfuel/lazyjira/compare/v2.7.1...HEAD
+[Unreleased]: https://github.com/textfuel/lazyjira/compare/v2.7.2...HEAD
+[2.7.2]: https://github.com/textfuel/lazyjira/compare/v2.7.1...v2.7.2
 [2.7.1]: https://github.com/textfuel/lazyjira/compare/v2.7.0...v2.7.1
 [2.7.0]: https://github.com/textfuel/lazyjira/compare/v2.6.8...v2.7.0
 [2.6.8]: https://github.com/textfuel/lazyjira/compare/v2.6.7...v2.6.8
