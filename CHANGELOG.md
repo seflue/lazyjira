@@ -7,6 +7,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [2.8.0] - 2026-04-10
+
 ### Added
 
 - Search and filter in keybindings help popup. Press `/` in the `?` menu to filter by key or description (#15)
@@ -315,7 +317,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Cross-platform: macOS, Linux, Windows
 - Homebrew install via tap
 
-[Unreleased]: https://github.com/textfuel/lazyjira/compare/v2.7.4...HEAD
+[Unreleased]: https://github.com/textfuel/lazyjira/compare/v2.8.0...HEAD
+[2.8.0]: https://github.com/textfuel/lazyjira/compare/v2.7.4...v2.8.0
 [2.7.4]: https://github.com/textfuel/lazyjira/compare/v2.7.3...v2.7.4
 [2.7.3]: https://github.com/textfuel/lazyjira/compare/v2.7.2...v2.7.3
 [2.7.2]: https://github.com/textfuel/lazyjira/compare/v2.7.1...v2.7.2
