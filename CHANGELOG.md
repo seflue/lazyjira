@@ -11,6 +11,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 - Configurable custom commands. Bind shell commands to keys with Go template access to the focused issue, project or comment. Commands declare which UI contexts they fire in and take precedence over built-in keys. Includes `suspend` flag and `shellescape` template helper (#42)
 - `maxResults` option to control how many issues are fetched per query. Can be set globally or per tab in `issueTabs`. Default remains 50 (#45)
+- Context-sensitive preview for Sub/Lnk tabs. Moving the cursor in subtasks or links previews that issue in the detail pane. Actions target the previewed issue. Preview resets when leaving the tab (#55)
 
 ## [2.9.0] - 2026-04-14
 
