@@ -7,6 +7,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [2.11.0] - 2026-04-30
+
 ### Added
 
 - Catppuccin theme support. Pick from Latte, Frappé, Macchiato or Mocha via `gui.theme` in config. Default ANSI palette stays the same. Catppuccin flavors use hex colors and need a terminal with truecolor support (#59)
@@ -362,7 +364,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Cross-platform: macOS, Linux, Windows
 - Homebrew install via tap
 
-[Unreleased]: https://github.com/textfuel/lazyjira/compare/v2.10.2...HEAD
+[Unreleased]: https://github.com/textfuel/lazyjira/compare/v2.11.0...HEAD
+[2.11.0]: https://github.com/textfuel/lazyjira/compare/v2.10.2...v2.11.0
 [2.10.2]: https://github.com/textfuel/lazyjira/compare/v2.10.1...v2.10.2
 [2.10.1]: https://github.com/textfuel/lazyjira/compare/v2.10.0...v2.10.1
 [2.10.0]: https://github.com/textfuel/lazyjira/compare/v2.9.0...v2.10.0
