@@ -61,6 +61,25 @@ func TestTransientTabs_addRemoveByKind(t *testing.T) {
 	}
 }
 
+func TestRemoveJQLTab_returnsToOrigin(t *testing.T) {
+	t.Parallel()
+	m := listWithTabs(
+		config.IssueTabConfig{Name: "All", JQL: "x"},
+		config.IssueTabConfig{Name: "Mine", JQL: "y"},
+	)
+	m.SetTabIndex(1) // user is on "Mine" when opening JQL search
+
+	m.AddJQLTab("project = FOO")
+	if !m.IsJQLTab() {
+		t.Fatal("expected JQL tab active after AddJQLTab")
+	}
+
+	m.RemoveJQLTab()
+	if got := m.GetTabIndex(); got != 1 {
+		t.Errorf("after closing JQL tab, GetTabIndex() = %d, want 1 (origin tab)", got)
+	}
+}
+
 func TestTabCache_loadedDistinctFromEmpty(t *testing.T) {
 	t.Parallel()
 	m := listWithTabs(config.IssueTabConfig{Name: "All", JQL: "x"})
