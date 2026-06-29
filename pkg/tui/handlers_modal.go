@@ -173,6 +173,8 @@ func (a *App) handleInputConfirmed(msg components.InputConfirmedMsg) (tea.Model,
 				return a, gitCreateBranch(a.gitRepoPath, msg.Text)
 			}
 		}
+	case editTabName:
+		return a, a.saveManagedTab(strings.TrimSpace(msg.Text), ctx.tabJQL, ctx.tabMaxResults)
 	}
 	return a, nil
 }
