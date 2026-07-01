@@ -59,6 +59,10 @@ func (t *TextArea) setCursor(pos int) {
 // LineCount reports the number of visual lines (hard newlines + 1).
 func (t *TextArea) LineCount() int { return strings.Count(t.value, "\n") + 1 }
 
+// VisualLineCount reports the number of on-screen rows after soft-wrapping at the
+// current width (always at least 1).
+func (t *TextArea) VisualLineCount() int { return len(wrapLines([]rune(t.value), t.width)) }
+
 func (t *TextArea) InsertAtCursor(s string) {
 	runes := []rune(t.value)
 	inserted := []rune(s)
