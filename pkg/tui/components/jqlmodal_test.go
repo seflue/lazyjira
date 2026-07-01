@@ -217,6 +217,68 @@ func TestJQLModal_EnterSubmitsQuery(t *testing.T) {
 	testkit.AssertEqual(t, "submitted query", submitted.Query, testQueryText)
 }
 
+func TestJQLModal_CtrlJInsertsNewlineWhenInputFocused(t *testing.T) {
+	t.Parallel()
+	m := NewJQLModal()
+	m.SetSize(80, 24)
+	m.Show("a", nil)
+	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlJ})
+	if !strings.Contains(m.InputValue(), "\n") {
+		t.Errorf("expected newline in input, got %q", m.InputValue())
+	}
+	if cmd == nil {
+		t.Fatal("expected changed command")
+	}
+	if _, ok := cmd().(JQLInputChangedMsg); !ok {
+		t.Errorf("expected JQLInputChangedMsg, got %T", cmd())
+	}
+}
+
+func TestJQLModal_AltEnterInsertsNewlineWhenInputFocused(t *testing.T) {
+	t.Parallel()
+	m := NewJQLModal()
+	m.SetSize(80, 24)
+	m.Show("a", nil)
+	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
+	if !strings.Contains(m.InputValue(), "\n") {
+		t.Errorf("expected newline in input, got %q", m.InputValue())
+	}
+	if cmd == nil {
+		t.Fatal("expected changed command")
+	}
+	if _, ok := cmd().(JQLInputChangedMsg); !ok {
+		t.Errorf("expected JQLInputChangedMsg, got %T", cmd())
+	}
+}
+
+func TestJQLModal_CtrlJMovesListWhenListFocused(t *testing.T) {
+	t.Parallel()
+	m := NewJQLModal()
+	m.SetSize(80, 24)
+	m.Show("", []string{testHistoryItem1, testHistoryItem2})
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	testkit.AssertEqual(t, "cursor initially 0", m.cursor, 0)
+	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlJ})
+	testkit.AssertEqual(t, "cursor moved down", m.cursor, 1)
+	testkit.AssertEqual(t, "no command", cmd == nil, true)
+}
+
+func TestJQLModal_InputHeightCapsAndListShrinks(t *testing.T) {
+	t.Parallel()
+	m := NewJQLModal()
+	m.SetSize(80, 24)
+	m.SetMaxHeightPercent(50)
+	m.Show("single line", nil)
+	baseList := m.listHeight()
+	testkit.AssertEqual(t, "single-line input is one row", m.visibleInputLines(), 1)
+
+	m.Show(strings.Repeat("a\n", 30)+"a", nil)
+	maxLines := m.maxInputLines()
+	vis := m.visibleInputLines()
+	testkit.AssertEqual(t, "input capped at max", vis, maxLines)
+	testkit.AssertEqual(t, "list shrinks by extra input rows", m.listHeight(), baseList-(vis-1))
+}
+
 func TestJQLModal_EnterWithEmptyQueryIsNoop(t *testing.T) {
 	t.Parallel()
 	m := NewJQLModal()

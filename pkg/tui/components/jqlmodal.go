@@ -30,25 +30,30 @@ const (
 	jqlModeAutocomplete = "autocomplete"
 )
 
+// defaultJQLEditorMaxHeightPercent mirrors config.DefaultJQLEditorMaxHeightPercent.
+// The components package must not import config, so the fallback lives here too.
+const defaultJQLEditorMaxHeightPercent = 50
+
 // JQLModal is a full-screen two-panel modal for JQL search
 type JQLModal struct {
-	input      TextInput
-	items      []string
-	cursor     int
-	offset     int
-	focusInput bool
-	visible    bool
-	loading    bool
-	acLoading  bool
-	errorMsg   string
-	mode       string
-	partialLen int
-	width      int
-	height     int
+	input        TextArea
+	items        []string
+	cursor       int
+	offset       int
+	focusInput   bool
+	visible      bool
+	loading      bool
+	acLoading    bool
+	errorMsg     string
+	mode         string
+	partialLen   int
+	width        int
+	height       int
+	maxHeightPct int
 }
 
 func NewJQLModal() JQLModal {
-	ti := NewTextInput()
+	ti := NewTextArea()
 	ti.Highlighter = HighlightJQL
 	return JQLModal{
 		input:      ti,
@@ -56,6 +61,10 @@ func NewJQLModal() JQLModal {
 		mode:       jqlModeHistory,
 	}
 }
+
+// SetMaxHeightPercent sets the share of terminal height the input panel may grow
+// to before its content scrolls.
+func (m *JQLModal) SetMaxHeightPercent(p int) { m.maxHeightPct = p }
 
 // Show opens the modal with prefilled text and history items
 func (m *JQLModal) Show(prefill string, history []string) {
@@ -120,8 +129,23 @@ func (m *JQLModal) InputValue() string { return m.input.Value() }
 // InputCursorPos returns the cursor position in the input
 func (m *JQLModal) InputCursorPos() int { return m.input.CursorPos() }
 
+// maxInputLines is the cap on visible input rows: a share of terminal height.
+func (m *JQLModal) maxInputLines() int {
+	pct := m.maxHeightPct
+	if pct <= 0 {
+		pct = defaultJQLEditorMaxHeightPercent
+	}
+	return max(1, m.height*pct/100)
+}
+
+// visibleInputLines is the single source of truth for how many rows the input
+// panel occupies: the content's visual line count, capped at maxInputLines.
+func (m *JQLModal) visibleInputLines() int {
+	return max(1, min(m.input.VisualLineCount(), m.maxInputLines()))
+}
+
 func (m *JQLModal) listHeight() int {
-	h := m.height - 8
+	h := m.height - 8 - (m.visibleInputLines() - 1)
 	if m.errorMsg != "" {
 		h--
 	}
@@ -174,7 +198,15 @@ func (m *JQLModal) handleKey(msg tea.KeyMsg) (JQLModal, tea.Cmd) {
 		return *m, func() tea.Msg { return JQLSaveTabMsg{Query: q} }
 
 	case tea.KeyEnter:
+		if m.focusInput && msg.Alt {
+			return m.insertNewline()
+		}
 		return m.handleEnter()
+
+	case tea.KeyCtrlJ:
+		if m.focusInput {
+			return m.insertNewline()
+		}
 	default:
 	}
 
@@ -194,6 +226,16 @@ func (m *JQLModal) handleKey(msg tea.KeyMsg) (JQLModal, tea.Cmd) {
 
 	m.handleListNav(msg)
 	return *m, nil
+}
+
+func (m *JQLModal) insertNewline() (JQLModal, tea.Cmd) {
+	m.input.InsertAtCursor("\n")
+	return *m, func() tea.Msg {
+		return JQLInputChangedMsg{
+			Text:      m.input.Value(),
+			CursorPos: m.input.CursorPos(),
+		}
+	}
 }
 
 func (m *JQLModal) handleEnter() (JQLModal, tea.Cmd) {
@@ -387,11 +429,13 @@ func (m *JQLModal) View() string {
 	contentW := max(m.width-4, 10)
 	borderStyle := lipgloss.NewStyle().Foreground(theme.ColorGreen)
 
+	inputLines := m.visibleInputLines()
+	m.input.SetHeight(inputLines)
 	inputContent := m.input.View()
 	if m.loading {
 		inputContent += lipgloss.NewStyle().Foreground(theme.ColorYellow).Render("  Searching...")
 	}
-	inputPanel := RenderPanelFull("JQL Query", "", inputContent, m.width-2, 1, m.focusInput, nil)
+	inputPanel := RenderPanelFull("JQL Query", "", inputContent, m.width-2, inputLines, m.focusInput, nil)
 
 	errorLine := ""
 	if m.errorMsg != "" {
