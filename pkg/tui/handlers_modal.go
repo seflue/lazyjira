@@ -189,6 +189,7 @@ func (a *App) handleInputCancelled() (tea.Model, tea.Cmd) {
 		a.createForm.Resume()
 	}
 	if ctx.returnToJQLModal {
+		a.editingManagedTab = ctx.prevEditingManagedTab
 		a.jqlModal.Show(ctx.tabJQL, LoadJQLHistory())
 	}
 	return a, nil

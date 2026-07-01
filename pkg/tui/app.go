@@ -77,6 +77,9 @@ type editCtx struct {
 	// returnToJQLModal marks the save-tab prompt opened via Ctrl+S from the JQL
 	// search modal: cancelling reopens the search with tabJQL instead of dropping it.
 	returnToJQLModal bool
+	// prevEditingManagedTab restores the managed-tab-edit context on that reopen,
+	// so the reopened search behaves and labels itself as it did before Ctrl+S.
+	prevEditingManagedTab int
 }
 
 type createCtx struct {
