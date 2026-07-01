@@ -24,6 +24,31 @@ func TestJQLModal_ShowPrefillsInput(t *testing.T) {
 	testkit.AssertEqual(t, "input value", m.InputValue(), testQueryText)
 }
 
+func TestJQLModal_HistoryItemRendersSingleLine(t *testing.T) {
+	t.Parallel()
+	m := NewJQLModal()
+	m.SetSize(80, 24)
+	m.Show("", []string{"project = FOO\nAND status = Open"})
+	out := m.renderListContent(m.listHeight(), 76)
+	if strings.Contains(out, "\n") {
+		t.Fatalf("history item rendered with newline: %q", out)
+	}
+	if !strings.Contains(out, "project = FOO AND status = Open") {
+		t.Fatalf("collapsed item missing from render: %q", out)
+	}
+}
+
+func TestJQLModal_HistorySelectionPreservesNewlines(t *testing.T) {
+	t.Parallel()
+	m := NewJQLModal()
+	m.SetSize(80, 24)
+	multi := "project = FOO\nAND status = Open"
+	m.Show("", []string{multi})
+	m.focusInput = false
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	testkit.AssertEqual(t, "selection keeps newlines", updated.InputValue(), multi)
+}
+
 func TestJQLModal_HideHidesModal(t *testing.T) {
 	t.Parallel()
 	m := NewJQLModal()
