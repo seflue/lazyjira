@@ -20,7 +20,7 @@ func (a *App) handleJQLSaveTab(msg components.JQLSaveTabMsg) (tea.Model, tea.Cmd
 	a.jqlModal.Hide()
 	a.editingManagedTab = -1
 	a.inputModal.Show("Save tab", "")
-	a.editContext = editCtx{kind: editTabName, tabJQL: msg.Query}
+	a.editContext = editCtx{kind: editTabName, tabJQL: msg.Query, returnToJQLModal: true}
 	return a, nil
 }
 

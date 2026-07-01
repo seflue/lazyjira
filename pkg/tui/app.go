@@ -74,6 +74,9 @@ type editCtx struct {
 	converterState any
 	tabJQL         string // captured at prompt time; source for editTabName confirm
 	tabMaxResults  *int   // promote carries the config tab's page size; nil for save
+	// returnToJQLModal marks the save-tab prompt opened via Ctrl+S from the JQL
+	// search modal: cancelling reopens the search with tabJQL instead of dropping it.
+	returnToJQLModal bool
 }
 
 type createCtx struct {
