@@ -62,29 +62,29 @@ func TestEditManagedTab_updatesQueryInPlace(t *testing.T) {
 	}
 }
 
-func TestEditManagedTab_multilineQueryNormalized(t *testing.T) {
+func TestEditManagedTab_multilineQueryPreserved(t *testing.T) {
 	t.Setenv("LAZYJIRA_CONFIG_DIR", t.TempDir())
-	app := newManagedTabApp(t, "project = ABC\nAND status = Open\nORDER BY updated DESC")
+	want := "project = ABC\nAND status = Open\nORDER BY updated DESC"
+	app := newManagedTabApp(t, want)
 
 	if _, _, ok := app.handleTabAction(ActJQLSearch); !ok {
 		t.Fatal("ActJQLSearch not dispatched")
 	}
 
-	got := app.jqlModal.InputValue()
-	want := "project = ABC AND status = Open ORDER BY updated DESC"
-	if got != want {
-		t.Errorf("multi-line query must prefill single-line: got %q, want %q", got, want)
+	if got := app.jqlModal.InputValue(); got != want {
+		t.Errorf("multi-line query must prefill with newlines intact: got %q, want %q", got, want)
 	}
 }
 
-func TestPromote_multilineConfigQueryStoredSingleLine(t *testing.T) {
+func TestPromote_multilineConfigQueryStoredMultiline(t *testing.T) {
 	t.Setenv("LAZYJIRA_CONFIG_DIR", t.TempDir())
 	app := newAppWithFake(t, &jiratest.FakeClient{T: t})
 	app.demoMode = true
 	app.keymap = DefaultKeymap()
 	app.projectKey = testProjectABC
+	want := "project = ABC\nAND status = Open\nORDER BY updated DESC"
 	app.issuesList.SetTabs([]config.IssueTabConfig{
-		{Name: "Multi", JQL: "project = ABC\nAND status = Open\nORDER BY updated DESC"},
+		{Name: "Multi", JQL: want},
 	})
 	app.issuesList.RebuildTabs(testProjectABC)
 	app.issuesList.SetTabIndex(0) // config Multi
@@ -95,9 +95,8 @@ func TestPromote_multilineConfigQueryStoredSingleLine(t *testing.T) {
 	if len(app.savedTabs) != 1 {
 		t.Fatalf("want 1 saved tab, got %+v", app.savedTabs)
 	}
-	want := "project = ABC AND status = Open ORDER BY updated DESC"
 	if app.savedTabs[0].JQL != want {
-		t.Errorf("stored JQL must be normalized single-line:\n got %q\nwant %q", app.savedTabs[0].JQL, want)
+		t.Errorf("stored JQL must keep newlines:\n got %q\nwant %q", app.savedTabs[0].JQL, want)
 	}
 }
 

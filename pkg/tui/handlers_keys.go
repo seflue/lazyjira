@@ -381,7 +381,7 @@ func (a *App) handleTabAction(action Action) (tea.Model, tea.Cmd, bool) {
 		history := LoadJQLHistory()
 		prefill := ""
 		if a.issuesList.IsManagedTab() {
-			prefill = normalizeJQL(a.issuesList.ActiveTab().JQL)
+			prefill = a.issuesList.ActiveTab().JQL
 			a.editingManagedTab = a.issuesList.ActiveManagedStoreIdx()
 		} else {
 			if a.projectKey != "" {
