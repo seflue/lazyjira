@@ -48,7 +48,7 @@ func (a *App) saveManagedTab(name, jql string, maxResults *int) tea.Cmd {
 			return nil
 		}
 	}
-	a.savedTabs = append(a.savedTabs, config.ManagedTab{Name: name, JQL: normalizeJQL(jql), Project: a.projectKey, MaxResults: maxResults})
+	a.savedTabs = append(a.savedTabs, config.ManagedTab{Name: name, JQL: jql, Project: a.projectKey, MaxResults: maxResults})
 	if err := config.SaveSavedTabs(a.savedTabs); err != nil {
 		a.helpBar.SetStatusMsg("save tabs: " + err.Error())
 	}

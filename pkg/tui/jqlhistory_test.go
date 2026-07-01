@@ -161,7 +161,7 @@ func TestLoadJQLHistory_MigratesLegacyToYAMLOnSave(t *testing.T) {
 	}
 
 	// File is now valid YAML sequence...
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // test reads a temp file it just wrote
 	if err != nil {
 		t.Fatalf("read migrated file: %v", err)
 	}
