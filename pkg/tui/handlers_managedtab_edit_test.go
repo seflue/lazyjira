@@ -140,6 +140,33 @@ func TestJQLSaveTab_fromModal_savesManagedTab(t *testing.T) {
 	}
 }
 
+func TestJQLSaveTab_escReopensSearchWithQuery(t *testing.T) {
+	t.Setenv("LAZYJIRA_CONFIG_DIR", t.TempDir())
+	app := newAppWithFake(t, &jiratest.FakeClient{T: t})
+	app.demoMode = true
+	app.projectKey = testProjectABC
+	app.issuesList.SetTabs([]config.IssueTabConfig{{Name: "All", JQL: "x"}})
+	app.jqlModal.SetSize(80, 24)
+	query := "project = X AND status = Open"
+	app.jqlModal.Show(query, nil)
+
+	app.Update(components.JQLSaveTabMsg{Query: query}) // Ctrl+S opens the name prompt
+	if app.jqlModal.IsVisible() {
+		t.Fatal("JQL modal should hide while the name prompt is open")
+	}
+
+	app.handleInputCancelled() // Esc on the name prompt
+	if !app.jqlModal.IsVisible() {
+		t.Fatal("Esc on the save-tab prompt must reopen the JQL search")
+	}
+	if got := app.jqlModal.InputValue(); got != query {
+		t.Fatalf("reopened search must keep the query, got %q", got)
+	}
+	if len(config.LoadSavedTabs()) != 0 {
+		t.Error("cancelling save must not persist a tab")
+	}
+}
+
 func TestHelpBar_jqlModal_hasSaveTabHint(t *testing.T) {
 	t.Parallel()
 	app := appForKeybindings(t)
