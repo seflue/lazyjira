@@ -173,10 +173,17 @@ func (a *App) helpBarItems() []components.HelpItem {
 		}
 		return items
 	case a.jqlModal.IsVisible():
+		// Enter and Ctrl+S do different things depending on whether the modal is
+		// editing an existing managed tab (Enter overwrites it) or running an
+		// ad-hoc search (Enter searches); label them by what they actually do.
+		enterDesc, saveDesc := "search", "save tab"
+		if a.editingManagedTab >= 0 {
+			enterDesc, saveDesc = "update tab", "save as new tab"
+		}
 		return []components.HelpItem{
-			{Key: "enter", Description: "search"},
+			{Key: "enter", Description: enterDesc},
 			{Key: "tab", Description: "switch focus"},
-			{Key: "ctrl+s", Description: "save tab"},
+			{Key: "ctrl+s", Description: saveDesc},
 			{Key: "esc", Description: "cancel"},
 		}
 	case a.showHelp:

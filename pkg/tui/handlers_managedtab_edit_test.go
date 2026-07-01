@@ -166,6 +166,53 @@ func TestJQLSaveTab_escReopensSearchWithQuery(t *testing.T) {
 	}
 }
 
+func TestJQLSaveTab_escRestoresManagedEditContext(t *testing.T) {
+	t.Setenv("LAZYJIRA_CONFIG_DIR", t.TempDir())
+	app := newAppWithFake(t, &jiratest.FakeClient{T: t})
+	app.jqlModal.SetSize(80, 24)
+	app.editingManagedTab = 2 // as if editing the managed tab at store index 2
+	app.jqlModal.Show("project = X", nil)
+
+	app.Update(components.JQLSaveTabMsg{Query: "project = X"})
+	if app.editingManagedTab != -1 {
+		t.Fatalf("save-tab prompt should clear editingManagedTab, got %d", app.editingManagedTab)
+	}
+	app.handleInputCancelled()
+	if app.editingManagedTab != 2 {
+		t.Fatalf("esc must restore the managed-edit context, got %d", app.editingManagedTab)
+	}
+}
+
+func TestHelpBar_jqlModal_labelsByContext(t *testing.T) {
+	t.Parallel()
+	find := func(items []components.HelpItem, key string) string {
+		for _, it := range items {
+			if it.Key == key {
+				return it.Description
+			}
+		}
+		return ""
+	}
+	app := appForKeybindings(t)
+	app.jqlModal.Show("", nil)
+
+	app.editingManagedTab = -1
+	if got := find(app.helpBarItems(), "enter"); got != "search" {
+		t.Errorf("plain: enter label = %q, want search", got)
+	}
+	if got := find(app.helpBarItems(), "ctrl+s"); got != "save tab" {
+		t.Errorf("plain: ctrl+s label = %q, want save tab", got)
+	}
+
+	app.editingManagedTab = 0
+	if got := find(app.helpBarItems(), "enter"); got != "update tab" {
+		t.Errorf("managed: enter label = %q, want update tab", got)
+	}
+	if got := find(app.helpBarItems(), "ctrl+s"); got != "save as new tab" {
+		t.Errorf("managed: ctrl+s label = %q, want save as new tab", got)
+	}
+}
+
 func TestHelpBar_jqlModal_hasSaveTabHint(t *testing.T) {
 	t.Parallel()
 	app := appForKeybindings(t)

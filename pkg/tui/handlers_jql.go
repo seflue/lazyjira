@@ -17,10 +17,11 @@ func (a *App) handleJQLSubmit(msg components.JQLSubmitMsg) (tea.Model, tea.Cmd) 
 // handleJQLSaveTab hides the JQL modal and opens the name prompt to persist the
 // current query as a new managed tab, reusing the editTabName confirm path.
 func (a *App) handleJQLSaveTab(msg components.JQLSaveTabMsg) (tea.Model, tea.Cmd) {
+	prev := a.editingManagedTab
 	a.jqlModal.Hide()
 	a.editingManagedTab = -1
 	a.inputModal.Show("Save tab", "")
-	a.editContext = editCtx{kind: editTabName, tabJQL: msg.Query, returnToJQLModal: true}
+	a.editContext = editCtx{kind: editTabName, tabJQL: msg.Query, returnToJQLModal: true, prevEditingManagedTab: prev}
 	return a, nil
 }
 
