@@ -387,6 +387,7 @@ func NewAppWithAuth(cfg *config.Config, client jira.ClientInterface, authMethod 
 	if cfg.Converter == config.ConverterAdfConverter {
 		app.converter = AdfConvConverter{}
 	}
+	app.jqlModal.SetMaxHeightPercent(cfg.ResolveJQLEditorMaxHeightPercent())
 	app.ctx, app.cancel = context.WithCancel(context.Background()) //nolint:gosec // cancel is called in Shutdown()
 	navResolver := app.keymap.MatchNav
 	app.issuesList.ResolveNav = navResolver
