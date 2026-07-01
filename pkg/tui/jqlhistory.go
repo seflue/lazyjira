@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/textfuel/lazyjira/v2/pkg/config"
 )
 
@@ -14,13 +16,20 @@ const (
 )
 
 // LoadJQLHistory loads JQL queries from the history file.
-// Returns empty slice on error or missing file
+// The current format is a YAML list of strings; legacy newline-delimited files
+// are read via the fallback below and migrated on the next SaveJQLHistory.
+// Returns nil on error, missing or empty file.
 func LoadJQLHistory() []string {
 	path := filepath.Join(config.ConfigDir(), jqlHistoryFile)
 	data, err := os.ReadFile(path) //nolint:gosec
 	if err != nil {
 		return nil
 	}
+	var queries []string
+	if err := yaml.Unmarshal(data, &queries); err == nil {
+		return queries
+	}
+	// Legacy format: a plain newline-delimited scalar, not a YAML sequence.
 	lines := strings.Split(string(data), "\n")
 	var result []string
 	for _, line := range lines {
@@ -31,15 +40,19 @@ func LoadJQLHistory() []string {
 	return result
 }
 
-// SaveJQLHistory writes queries to the history file
+// SaveJQLHistory writes queries to the history file as a YAML list, so entries
+// may contain embedded newlines (multi-line JQL).
 func SaveJQLHistory(queries []string) error {
 	dir := config.ConfigDir()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
+	data, err := yaml.Marshal(queries)
+	if err != nil {
+		return err
+	}
 	path := filepath.Join(dir, jqlHistoryFile)
-	content := strings.Join(queries, "\n")
-	return os.WriteFile(path, []byte(content), 0o644)
+	return os.WriteFile(path, data, 0o644)
 }
 
 // AddToHistory prepends a new query to the history, deduplicating.
