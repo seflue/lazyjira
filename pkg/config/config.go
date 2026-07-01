@@ -256,6 +256,9 @@ type GUIConfig struct {
 	TypeIcons            map[string]string `yaml:"typeIcons"`
 	StatusIcons          map[string]string `yaml:"statusIcons"`
 	PriorityIcons        map[string]string `yaml:"priorityIcons"`
+	// JQLEditorMaxHeightPercent is the share of terminal height the JQL editor
+	// panel may grow to before its content scrolls. Unset (0) uses the default.
+	JQLEditorMaxHeightPercent int `yaml:"jqlEditorMaxHeightPercent"`
 }
 
 // ShouldPrefillFromTab returns true when the creation form should prefill from tab JQL
@@ -314,6 +317,10 @@ func DefaultConfig() *Config {
 // requested.
 const DefaultMaxResults = 50
 
+// DefaultJQLEditorMaxHeightPercent is the fallback share of terminal height the
+// JQL editor panel may occupy when `jqlEditorMaxHeightPercent` is unset.
+const DefaultJQLEditorMaxHeightPercent = 50
+
 // ResolveGlobalMaxResults returns the effective page size for queries that
 // are not tied to a configured tab (ad-hoc JQL searches, JQL tabs): global
 // config value if set and positive, otherwise the compile-time default.
@@ -323,6 +330,23 @@ func (c *Config) ResolveGlobalMaxResults() int {
 		return *c.MaxResults
 	}
 	return DefaultMaxResults
+}
+
+// ResolveJQLEditorMaxHeightPercent returns the effective JQL editor max-height
+// percentage: the configured value clamped to [10,100] when set and positive,
+// otherwise the compile-time default. Unset (0) is treated as "use default".
+func (c *Config) ResolveJQLEditorMaxHeightPercent() int {
+	p := c.GUI.JQLEditorMaxHeightPercent
+	if p <= 0 {
+		return DefaultJQLEditorMaxHeightPercent
+	}
+	if p < 10 {
+		return 10
+	}
+	if p > 100 {
+		return 100
+	}
+	return p
 }
 
 // ResolveMaxResults returns the effective page size for a given tab:

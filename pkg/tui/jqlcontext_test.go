@@ -7,6 +7,28 @@ import (
 	"github.com/textfuel/lazyjira/v2/pkg/jira"
 )
 
+func TestRawPartialAfterDelimiter_trimsWhitespace(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name  string
+		input string
+		want  string
+		wantN int
+	}{
+		{"newline after IN-list open paren", "status in (\nOpe", "Ope", 3},
+		{"newline after operator", "project =\nFoo", "Foo", 3},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runes := []rune(tc.input)
+			got, n := rawPartialAfterDelimiter(runes, len(runes))
+			testkit.AssertEqual(t, "partial", got, tc.want)
+			testkit.AssertEqual(t, "partialLen", n, tc.wantN)
+		})
+	}
+}
+
 func TestParseJQLContext(t *testing.T) {
 	t.Parallel()
 

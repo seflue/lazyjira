@@ -138,7 +138,7 @@ func rawPartialAfterDelimiter(runes []rune, cursorPos int) (string, int) {
 		// Stop at operator chars followed by space: "= value"
 		// We detect this by checking if we hit a known operator boundary.
 		// Simple heuristic: stop at = ! ~ > < if followed by space.
-		if (r == '=' || r == '~' || r == '>' || r == '<') && i+1 < len(runes) && runes[i+1] == ' ' {
+		if (r == '=' || r == '~' || r == '>' || r == '<') && i+1 < len(runes) && isJQLSpace(runes[i+1]) {
 			break
 		}
 		if r == '!' && i+1 < len(runes) && (runes[i+1] == '=' || runes[i+1] == '~') {
@@ -148,13 +148,16 @@ func rawPartialAfterDelimiter(runes []rune, cursorPos int) (string, int) {
 	}
 	// i is now at the delimiter or -1. The partial starts after the delimiter.
 	start := i + 1
-	// Trim leading spaces.
-	for start < cursorPos && runes[start] == ' ' {
+	// Trim leading whitespace (JQL treats newlines/tabs as insignificant).
+	for start < cursorPos && isJQLSpace(runes[start]) {
 		start++
 	}
 	partial := string(runes[start:cursorPos])
 	return partial, cursorPos - start
 }
+
+// isJQLSpace reports whether r is JQL-insignificant whitespace.
+func isJQLSpace(r rune) bool { return r == ' ' || r == '\n' || r == '\t' }
 
 // findINListField checks if we're inside an IN(...) list and returns the field name.
 func findINListField(tokens []string, endsWithSpace bool) string {

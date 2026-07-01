@@ -170,6 +170,30 @@ func TestResolveGlobalMaxResults(t *testing.T) {
 	}
 }
 
+func TestResolveJQLEditorMaxHeightPercent(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		set  int
+		want int
+	}{
+		{"unset → default", 0, DefaultJQLEditorMaxHeightPercent},
+		{"set value read", 70, 70},
+		{"clamp low", 5, 10},
+		{"clamp high", 200, 100},
+		{"negative → default", -3, DefaultJQLEditorMaxHeightPercent},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			c := &Config{GUI: GUIConfig{JQLEditorMaxHeightPercent: tc.set}}
+			if got := c.ResolveJQLEditorMaxHeightPercent(); got != tc.want {
+				t.Errorf("ResolveJQLEditorMaxHeightPercent = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestDefaultConfig_MaxResults(t *testing.T) {
 	t.Parallel()
 	cfg := DefaultConfig()
