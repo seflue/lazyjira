@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 
 	"github.com/textfuel/lazyjira/v2/pkg/tui/theme"
 )
@@ -119,7 +120,8 @@ func wrapLines(runes []rune, width int) []visualLine {
 	return lines
 }
 
-// wrapLogicalLine wraps the single logical line runes[start:end] into rows.
+// wrapLogicalLine wraps the single logical line runes[start:end] into rows,
+// measured in terminal cells so wide runes (CJK, emoji) never overflow width.
 func wrapLogicalLine(runes []rune, start, end, width int) []visualLine {
 	if width <= 0 {
 		return []visualLine{{start, end}}
@@ -127,12 +129,25 @@ func wrapLogicalLine(runes []rune, start, end, width int) []visualLine {
 	var out []visualLine
 	segStart := start
 	for {
-		if end-segStart <= width {
+		if cellWidth(runes[segStart:end]) <= width {
 			out = append(out, visualLine{segStart, end})
 			return out
 		}
-		breakAt := segStart + width // hard break unless a space is found within width
-		for j := segStart + width - 1; j > segStart; j-- {
+		// Advance until one more rune would exceed the cell budget.
+		cells, hardEnd := 0, segStart
+		for hardEnd < end {
+			w := runewidth.RuneWidth(runes[hardEnd])
+			if cells+w > width {
+				break
+			}
+			cells += w
+			hardEnd++
+		}
+		if hardEnd == segStart { // a single rune wider than the whole row
+			hardEnd = segStart + 1
+		}
+		breakAt := hardEnd
+		for j := hardEnd - 1; j > segStart; j-- {
 			if runes[j] == ' ' {
 				breakAt = j + 1 // keep the space on the current row
 				break
@@ -141,6 +156,15 @@ func wrapLogicalLine(runes []rune, start, end, width int) []visualLine {
 		out = append(out, visualLine{segStart, breakAt})
 		segStart = breakAt
 	}
+}
+
+// cellWidth is the terminal display width of runes.
+func cellWidth(runes []rune) int {
+	w := 0
+	for _, r := range runes {
+		w += runewidth.RuneWidth(r)
+	}
+	return w
 }
 
 // visualPos maps a flat rune index to its (row, col). At a soft-wrap boundary the
@@ -280,11 +304,14 @@ func (t *TextArea) moveVertical(runes []rune, dir int) {
 	}
 
 	vl := lines[target]
-	c := t.desiredCol
-	if maxCol := vl.end - vl.start; c > maxCol {
-		c = maxCol
+	maxCol := vl.end - vl.start
+	// A position at vl.end that is a soft-wrap boundary renders as column 0 of the
+	// next row (see visualPos), so the last column that lands on a soft-continued
+	// row is maxCol-1. Rows ending at a hard newline or the value end keep maxCol.
+	if target+1 < len(lines) && lines[target+1].start == vl.end {
+		maxCol--
 	}
-	t.cursor = vl.start + c
+	t.cursor = vl.start + min(t.desiredCol, maxCol)
 }
 
 func (t *TextArea) deleteWord(runes []rune) (TextArea, bool) {

@@ -289,3 +289,27 @@ func TestTextArea_View_WithHighlighterDoesNotPanic(t *testing.T) {
 
 	_ = ta.View() // must not panic; cursor placed within a highlighted segment
 }
+
+func TestTextArea_DownAcrossSoftWrapNoSkip(t *testing.T) {
+	t.Parallel()
+	ta := NewTextArea()
+	ta.SetWidth(4)
+	ta.SetValue("wxyz\nqrstuv") // visual rows {0,4} {5,9} {9,11}
+	ta.setCursor(4)             // end of the first (full) row
+	ta, _ = ta.Update(tea.KeyMsg{Type: tea.KeyDown})
+	lines := wrapLines([]rune(ta.Value()), 4)
+	row, _ := visualPos(lines, ta.CursorPos())
+	if row != 1 {
+		t.Fatalf("Down should land on the qrst fragment (row 1), got row %d (cursor %d)", row, ta.CursorPos())
+	}
+}
+
+func TestTextArea_WrapUsesDisplayWidth(t *testing.T) {
+	t.Parallel()
+	if got := len(wrapLines([]rune("aa世"), 4)); got != 1 { // 1+1+2 = 4 cells fit
+		t.Fatalf("aa世 (4 cells) should be one row, got %d", got)
+	}
+	if got := len(wrapLines([]rune("aaa世"), 4)); got != 2 { // 1+1+1+2 = 5 cells wrap
+		t.Fatalf("aaa世 (5 cells) should wrap to two rows, got %d", got)
+	}
+}

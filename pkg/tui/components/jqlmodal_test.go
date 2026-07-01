@@ -49,6 +49,20 @@ func TestJQLModal_HistorySelectionPreservesNewlines(t *testing.T) {
 	testkit.AssertEqual(t, "selection keeps newlines", updated.InputValue(), multi)
 }
 
+func TestJQLModal_InputHeightBoundedOnSmallTerminal(t *testing.T) {
+	t.Parallel()
+	m := NewJQLModal()
+	m.SetMaxHeightPercent(50)
+	m.SetSize(80, 12)
+	m.Show(strings.Repeat("x\n", 30), nil)  // input far taller than the terminal
+	if got := m.maxInputLines(); got != 2 { // bySpace = 12-10 = 2, below byPct = 6
+		t.Fatalf("maxInputLines on height 12 = %d, want 2 (space-bounded)", got)
+	}
+	if m.listHeight() < 3 {
+		t.Fatalf("listHeight fell below floor: %d", m.listHeight())
+	}
+}
+
 func TestJQLModal_HideHidesModal(t *testing.T) {
 	t.Parallel()
 	m := NewJQLModal()

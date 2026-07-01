@@ -135,7 +135,11 @@ func (m *JQLModal) maxInputLines() int {
 	if pct <= 0 {
 		pct = defaultJQLEditorMaxHeightPercent
 	}
-	return max(1, m.height*pct/100)
+	byPct := max(1, m.height*pct/100)
+	// Keep chrome plus the minimum list (3 rows) on screen: listHeight is
+	// m.height-8-(inputLines-1) floored at 3, so cap growth at m.height-10.
+	bySpace := max(1, m.height-10)
+	return min(byPct, bySpace)
 }
 
 // visibleInputLines is the single source of truth for how many rows the input
