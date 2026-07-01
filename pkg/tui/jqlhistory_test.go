@@ -1,7 +1,11 @@
 package tui
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/textfuel/lazyjira/v2/pkg/internal/testkit"
 )
@@ -95,4 +99,78 @@ func TestLoadJQLHistory_MissingFileReturnsNil(t *testing.T) {
 	if result != nil {
 		t.Errorf("expected nil for missing file, got %v", result)
 	}
+}
+
+func TestSaveAndLoadJQLHistory_MultilineRoundTrip(t *testing.T) {
+	t.Setenv("LAZYJIRA_CONFIG_DIR", t.TempDir())
+
+	queries := []string{
+		"project = FOO\nAND status = Open",
+		"assignee = currentUser()",
+	}
+
+	if err := SaveJQLHistory(queries); err != nil {
+		t.Fatalf("SaveJQLHistory: %v", err)
+	}
+
+	loaded := LoadJQLHistory()
+	testkit.AssertSliceEqual(t, "loaded queries", loaded, queries)
+}
+
+func TestLoadJQLHistory_LegacyNewlineFormat(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LAZYJIRA_CONFIG_DIR", dir)
+
+	// Old on-disk format: newline-delimited, one entry per line, with a
+	// trailing blank line to exercise empty-line dropping.
+	legacy := "project = A\nproject = B\n"
+	if err := os.WriteFile(filepath.Join(dir, jqlHistoryFile), []byte(legacy), 0o644); err != nil {
+		t.Fatalf("write legacy file: %v", err)
+	}
+
+	loaded := LoadJQLHistory()
+	testkit.AssertSliceEqual(t, "loaded queries", loaded, []string{"project = A", "project = B"})
+}
+
+func TestLoadJQLHistory_EmptyFileReturnsNil(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LAZYJIRA_CONFIG_DIR", dir)
+
+	if err := os.WriteFile(filepath.Join(dir, jqlHistoryFile), nil, 0o644); err != nil {
+		t.Fatalf("write empty file: %v", err)
+	}
+
+	if result := LoadJQLHistory(); result != nil {
+		t.Errorf("expected nil for empty file, got %v", result)
+	}
+}
+
+func TestLoadJQLHistory_MigratesLegacyToYAMLOnSave(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LAZYJIRA_CONFIG_DIR", dir)
+
+	legacy := "project = A\nproject = B\n"
+	path := filepath.Join(dir, jqlHistoryFile)
+	if err := os.WriteFile(path, []byte(legacy), 0o644); err != nil {
+		t.Fatalf("write legacy file: %v", err)
+	}
+
+	loaded := LoadJQLHistory()
+	if err := SaveJQLHistory(loaded); err != nil {
+		t.Fatalf("SaveJQLHistory: %v", err)
+	}
+
+	// File is now valid YAML sequence...
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read migrated file: %v", err)
+	}
+	var asYAML []string
+	if err := yaml.Unmarshal(data, &asYAML); err != nil {
+		t.Fatalf("migrated file is not a YAML sequence: %v", err)
+	}
+
+	// ...and re-loads identically.
+	reloaded := LoadJQLHistory()
+	testkit.AssertSliceEqual(t, "reloaded queries", reloaded, []string{"project = A", "project = B"})
 }
