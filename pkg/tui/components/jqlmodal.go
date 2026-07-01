@@ -505,7 +505,7 @@ func (m *JQLModal) renderListContent(listH, contentW int) string {
 		var rows []string
 		end := min(m.offset+listH, len(m.items))
 		for i := m.offset; i < end; i++ {
-			item := m.items[i]
+			item := strings.Join(strings.Fields(m.items[i]), " ")
 			iw := contentW - 2
 			if len(item) > iw {
 				item = item[:iw]
