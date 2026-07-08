@@ -626,8 +626,8 @@ schema = 3
     version = "v0.1.5"
     hash = "sha256-wPHpuDFMV+35JjOpyVW5OElsSnGVjaUkMkjmsHOoFI4="
   [mod."github.com/yuin/goldmark"]
-    version = "v1.7.13"
-    hash = "sha256-vBCxZrPYPc8x/nvAAv3Au59dCCyfS80Vw3/a9EXK7TE="
+    version = "v1.7.17"
+    hash = "sha256-QC6s1ai8rS/oOn/U9lQQEDTNUExdpn+diKPNdUi7k74="
   [mod."github.com/yuin/goldmark-emoji"]
     version = "v1.0.6"
     hash = "sha256-+d6bZzOPE+JSFsZbQNZMCWE+n3jgcQnkPETVk47mxSY="
@@ -662,14 +662,14 @@ schema = 3
     version = "v0.36.0"
     hash = "sha256-ZhyOvy9ptbV+pna/CNyQFr5cKRn5O+B2QzkQAISKgco="
   [mod."golang.org/x/net"]
-    version = "v0.54.0"
-    hash = "sha256-/EoIXzTQzK/yP/lxOyx0Z/bhns4FdPTIF4uyt4gIP80="
+    version = "v0.55.0"
+    hash = "sha256-Phi2mSmBGOJcvqPPAit3uqF3UP8SKRI9dHj6yTM3s5s="
   [mod."golang.org/x/sync"]
     version = "v0.21.0"
     hash = "sha256-2n7PVb1krz7UpnXYGVmCrxV0fZBnjQdVVt6eVudEPYY="
   [mod."golang.org/x/sys"]
-    version = "v0.44.0"
-    hash = "sha256-JDlj+PKsG6I6kjv5JyOUNreY51u5An0oZ5OZMHZSk+A="
+    version = "v0.45.0"
+    hash = "sha256-hkBoNazrDA67ER6sWhb+EKxx9nJ24+nz3zGy+zT5Hvw="
   [mod."golang.org/x/text"]
     version = "v0.38.0"
     hash = "sha256-PzREcn7yzTAJ0WBvyYL/2/r+tfoeKTY/E5HVXi/CJsU="
