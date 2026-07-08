@@ -82,9 +82,9 @@ let
       hash = "...";
     };
 
-  buildGoApplication = import (lazyjiraSrc + "/nix/build-go-application.nix") system;
+  buildGoApplication = import "${src}/nix/build-go-application.nix" system;
 in
-callPackage ./nix/package.nix {inherit buildGoApplication version;}
+callPackage "${src}/nix/package.nix" { inherit buildGoApplication version; }
 ```
 
 #### deb (Debian, Ubuntu)

@@ -7,6 +7,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- Nix: importing the package outside a flake now works, and cross compilation is possible. `nix/package.nix` used to import `nixpkgs` without a `system`, which broke every manual import. It now takes `lib` and `buildGoApplication` as inputs instead of importing `nixpkgs` itself, and a new `nix/build-go-application.nix` resolves `buildGoApplication` from the pinned `flake.lock` for non flake users (#103)
+
 ## [2.19.1] - 2026-07-02
 
 ### Added
