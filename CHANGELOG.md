@@ -7,6 +7,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [2.19.2] - 2026-07-08
+
 ### Fixed
 
 - Nix: importing the package outside a flake now works, and cross compilation is possible. `nix/package.nix` used to import `nixpkgs` without a `system`, which broke every manual import. It now takes `lib` and `buildGoApplication` as inputs instead of importing `nixpkgs` itself, and a new `nix/build-go-application.nix` resolves `buildGoApplication` from the pinned `flake.lock` for non flake users (#103)
@@ -473,7 +475,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Cross-platform: macOS, Linux, Windows
 - Homebrew install via tap
 
-[Unreleased]: https://github.com/textfuel/lazyjira/compare/v2.19.1...HEAD
+[Unreleased]: https://github.com/textfuel/lazyjira/compare/v2.19.2...HEAD
+[2.19.2]: https://github.com/textfuel/lazyjira/compare/v2.19.1...v2.19.2
 [2.19.1]: https://github.com/textfuel/lazyjira/compare/v2.19.0...v2.19.1
 [2.19.0]: https://github.com/textfuel/lazyjira/compare/v2.18.0...v2.19.0
 [2.18.0]: https://github.com/textfuel/lazyjira/compare/v2.17.0...v2.18.0
