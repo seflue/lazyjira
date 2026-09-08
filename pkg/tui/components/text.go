@@ -1,6 +1,9 @@
 package components
 
-import "slices"
+import (
+	"slices"
+	"strings"
+)
 
 import "github.com/charmbracelet/lipgloss"
 
@@ -81,4 +84,70 @@ func Truncate(s string, maxLen int) string {
 // PanelDimensions computes usable content width and inner height from total panel dimensions.
 func PanelDimensions(width, height int) (contentWidth, innerHeight int) {
 	return max(width-2, 10), max(height-2, 1)
+}
+
+// WrapSegments breaks s into lines of at most width columns. Breaks are placed
+// at spaces and at URL separators -- before '?' and '&', after ',' -- so query
+// parameters and field lists stay readable instead of being cut mid-token. A
+// segment longer than width is split at width, never inside a percent-escape.
+func WrapSegments(s string, width int) []string {
+	if width < 1 || s == "" {
+		return nil
+	}
+
+	var lines []string
+	for _, seg := range splitSegments(s) {
+		if len(lines) > 0 {
+			last := lines[len(lines)-1]
+			if len([]rune(last))+len([]rune(seg)) <= width {
+				lines[len(lines)-1] = last + seg
+				continue
+			}
+		}
+		lines = append(lines, splitAtWidth(strings.TrimLeft(seg, " "), width)...)
+	}
+	return lines
+}
+
+// splitSegments cuts s before '?' and '&' and after ',' and ' ', keeping the
+// separators attached so joining the segments reproduces s.
+func splitSegments(s string) []string {
+	runes := []rune(s)
+	var segs []string
+	start := 0
+	for i, r := range runes {
+		switch r {
+		case '?', '&':
+			if i > start {
+				segs = append(segs, string(runes[start:i]))
+				start = i
+			}
+		case ',', ' ':
+			segs = append(segs, string(runes[start:i+1]))
+			start = i + 1
+		}
+	}
+	if start < len(runes) {
+		segs = append(segs, string(runes[start:]))
+	}
+	return segs
+}
+
+// splitAtWidth chops s into width-sized chunks, backing off so a cut never
+// lands inside a percent-escape.
+func splitAtWidth(s string, width int) []string {
+	runes := []rune(s)
+	var out []string
+	for len(runes) > width {
+		cut := width
+		for cut > 1 && (runes[cut-1] == '%' || (cut > 2 && runes[cut-2] == '%')) {
+			cut--
+		}
+		out = append(out, string(runes[:cut]))
+		runes = runes[cut:]
+	}
+	if len(runes) > 0 {
+		out = append(out, string(runes))
+	}
+	return out
 }

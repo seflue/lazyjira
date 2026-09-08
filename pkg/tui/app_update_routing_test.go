@@ -559,7 +559,7 @@ func TestUpdate_RoutesJQLAndNavMessages(t *testing.T) {
 		},
 		{
 			name: "jql search error sets modal error",
-			msg:  jqlSearchErrorMsg{err: "bad jql"},
+			msg:  jqlSearchErrorMsg{err: errors.New("bad jql")},
 		},
 		{
 			name: "jql cancel is noop",

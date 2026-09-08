@@ -34,17 +34,31 @@ const (
 // The components package must not import config, so the fallback lives here too.
 const defaultJQLEditorMaxHeightPercent = 50
 
-// JQLModal is a full-screen two-panel modal for JQL search
+// jqlFocus names the panel that currently has focus.
+type jqlFocus int
+
+const (
+	jqlFocusInput jqlFocus = iota
+	jqlFocusError
+	jqlFocusList
+)
+
+// JQLModal is a full-screen modal for JQL search. It shows the query input, an
+// error panel while the last search failed, and history or autocomplete
+// suggestions.
 type JQLModal struct {
 	input        TextArea
 	items        []string
 	cursor       int
 	offset       int
-	focusInput   bool
+	focus        jqlFocus
 	visible      bool
 	loading      bool
 	acLoading    bool
-	errorMsg     string
+	errLines     []string
+	errWrapped   []string
+	errHeadLines int
+	errOffset    int
 	mode         string
 	partialLen   int
 	width        int
@@ -56,9 +70,9 @@ func NewJQLModal() JQLModal {
 	ti := NewTextArea()
 	ti.Highlighter = HighlightJQL
 	return JQLModal{
-		input:      ti,
-		focusInput: true,
-		mode:       jqlModeHistory,
+		input: ti,
+		focus: jqlFocusInput,
+		mode:  jqlModeHistory,
 	}
 }
 
@@ -69,20 +83,21 @@ func (m *JQLModal) SetMaxHeightPercent(p int) { m.maxHeightPct = p }
 // Show opens the modal with prefilled text and history items
 func (m *JQLModal) Show(prefill string, history []string) {
 	m.visible = true
-	m.focusInput = true
+	m.focus = jqlFocusInput
 	m.input.SetValue(prefill)
 	m.items = history
 	m.cursor = 0
 	m.offset = 0
 	m.loading = false
 	m.acLoading = false
-	m.errorMsg = ""
 	m.mode = jqlModeHistory
+	m.clearError()
 }
 
-// Hide closes the modal
+// Hide closes the modal and drops the error state with it
 func (m *JQLModal) Hide() {
 	m.visible = false
+	m.clearError()
 }
 
 func (m *JQLModal) IsVisible() bool { return m.visible }
@@ -91,12 +106,71 @@ func (m *JQLModal) SetSize(w, h int) {
 	m.width = w
 	m.height = h
 	m.input.SetWidth(w - 6)
+	m.rewrapError()
 }
 
 func (m *JQLModal) SetLoading(v bool) { m.loading = v }
-func (m *JQLModal) SetError(msg string) {
-	m.errorMsg = msg
+
+// SetError shows lines in the error panel. Each entry is one logical line and
+// is wrapped to the panel width; an empty entry renders as a blank separator
+// and marks the end of the highlighted message block.
+func (m *JQLModal) SetError(lines []string) {
+	m.errLines = lines
+	m.errOffset = 0
 	m.loading = false
+	m.rewrapError()
+}
+
+// HasError reports whether the error panel is showing
+func (m *JQLModal) HasError() bool { return len(m.errWrapped) > 0 }
+
+func (m *JQLModal) clearError() {
+	m.errLines = nil
+	m.errWrapped = nil
+	m.errHeadLines = 0
+	m.errOffset = 0
+	if m.focus == jqlFocusError {
+		m.focus = jqlFocusInput
+	}
+}
+
+// rewrapError recomputes the wrapped error lines for the current width.
+func (m *JQLModal) rewrapError() {
+	m.errWrapped = nil
+	m.errHeadLines = 0
+	if len(m.errLines) == 0 {
+		return
+	}
+
+	width := max(m.width-5, 10)
+	head := true
+	for _, line := range m.errLines {
+		if line == "" {
+			head = false
+			m.errWrapped = append(m.errWrapped, "")
+			continue
+		}
+		wrapped := WrapSegments(line, width)
+		m.errWrapped = append(m.errWrapped, wrapped...)
+		if head {
+			m.errHeadLines += len(wrapped)
+		}
+	}
+
+	m.errOffset = min(m.errOffset, m.maxErrorOffset())
+}
+
+// errorHeight is the visible height of the error panel, capped at a third of
+// the modal so the history list keeps usable space.
+func (m *JQLModal) errorHeight() int {
+	if len(m.errWrapped) == 0 {
+		return 0
+	}
+	return min(len(m.errWrapped), max(m.height/3, 4))
+}
+
+func (m *JQLModal) maxErrorOffset() int {
+	return max(len(m.errWrapped)-m.errorHeight(), 0)
 }
 
 // SetSuggestions switches the bottom panel to autocomplete mode with suggestions
@@ -150,8 +224,8 @@ func (m *JQLModal) visibleInputLines() int {
 
 func (m *JQLModal) listHeight() int {
 	h := m.height - 8 - (m.visibleInputLines() - 1)
-	if m.errorMsg != "" {
-		h--
+	if eh := m.errorHeight(); eh > 0 {
+		h -= eh + 2
 	}
 	return max(h, 3)
 }
@@ -167,22 +241,34 @@ func (m *JQLModal) Update(msg tea.Msg) (JQLModal, tea.Cmd) {
 	return *m, nil
 }
 
-func (m *JQLModal) handleKey(msg tea.KeyMsg) (JQLModal, tea.Cmd) {
-	if m.errorMsg != "" && m.focusInput {
-		m.errorMsg = ""
+// nextFocus cycles input -> error -> list, skipping the error panel when there
+// is nothing to show.
+func (m *JQLModal) nextFocus() jqlFocus {
+	switch m.focus {
+	case jqlFocusInput:
+		if m.HasError() {
+			return jqlFocusError
+		}
+		return jqlFocusList
+	case jqlFocusError:
+		return jqlFocusList
+	default:
+		return jqlFocusInput
 	}
+}
 
+func (m *JQLModal) handleKey(msg tea.KeyMsg) (JQLModal, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
-		if !m.focusInput {
-			m.focusInput = true
+		if m.focus != jqlFocusInput {
+			m.focus = jqlFocusInput
 			return *m, nil
 		}
 		m.Hide()
 		return *m, func() tea.Msg { return JQLCancelMsg{} }
 
 	case tea.KeyTab:
-		if m.focusInput && m.mode == jqlModeAutocomplete && len(m.items) == 1 {
+		if m.focus == jqlFocusInput && m.mode == jqlModeAutocomplete && len(m.items) == 1 {
 			m.insertSuggestion(m.items[0])
 			return *m, func() tea.Msg {
 				return JQLInputChangedMsg{
@@ -191,7 +277,7 @@ func (m *JQLModal) handleKey(msg tea.KeyMsg) (JQLModal, tea.Cmd) {
 				}
 			}
 		}
-		m.focusInput = !m.focusInput
+		m.focus = m.nextFocus()
 		return *m, nil
 
 	case tea.KeyCtrlS:
@@ -202,19 +288,20 @@ func (m *JQLModal) handleKey(msg tea.KeyMsg) (JQLModal, tea.Cmd) {
 		return *m, func() tea.Msg { return JQLSaveTabMsg{Query: q} }
 
 	case tea.KeyEnter:
-		if m.focusInput && msg.Alt {
+		if m.focus == jqlFocusInput && msg.Alt {
 			return m.insertNewline()
 		}
 		return m.handleEnter()
 
 	case tea.KeyCtrlJ:
-		if m.focusInput {
+		if m.focus == jqlFocusInput {
 			return m.insertNewline()
 		}
 	default:
 	}
 
-	if m.focusInput {
+	switch m.focus {
+	case jqlFocusInput:
 		updated, changed := m.input.Update(msg)
 		m.input = updated
 		if changed {
@@ -225,10 +312,11 @@ func (m *JQLModal) handleKey(msg tea.KeyMsg) (JQLModal, tea.Cmd) {
 				}
 			}
 		}
-		return *m, nil
+	case jqlFocusError:
+		m.handleErrorNav(msg)
+	default:
+		m.handleListNav(msg)
 	}
-
-	m.handleListNav(msg)
 	return *m, nil
 }
 
@@ -243,7 +331,7 @@ func (m *JQLModal) insertNewline() (JQLModal, tea.Cmd) {
 }
 
 func (m *JQLModal) handleEnter() (JQLModal, tea.Cmd) {
-	if m.focusInput {
+	if m.focus == jqlFocusInput {
 		if m.loading {
 			return *m, nil
 		}
@@ -252,17 +340,21 @@ func (m *JQLModal) handleEnter() (JQLModal, tea.Cmd) {
 			return *m, nil
 		}
 		m.loading = true
+		m.clearError()
 		return *m, func() tea.Msg { return JQLSubmitMsg{Query: q} }
+	}
+	if m.focus == jqlFocusError {
+		return *m, nil
 	}
 	if m.cursor >= 0 && m.cursor < len(m.items) {
 		selected := m.items[m.cursor]
 		if m.mode == jqlModeHistory {
 			m.input.SetValue(selected)
-			m.focusInput = true
+			m.focus = jqlFocusInput
 			return *m, nil
 		}
 		m.insertSuggestion(selected)
-		m.focusInput = true
+		m.focus = jqlFocusInput
 		return *m, func() tea.Msg {
 			return JQLInputChangedMsg{
 				Text:      m.input.Value(),
@@ -271,6 +363,24 @@ func (m *JQLModal) handleEnter() (JQLModal, tea.Cmd) {
 		}
 	}
 	return *m, nil
+}
+
+func (m *JQLModal) handleErrorNav(msg tea.KeyMsg) {
+	maxOffset := m.maxErrorOffset()
+	switch {
+	case msg.String() == "j" || msg.Type == tea.KeyDown || msg.Type == tea.KeyCtrlJ:
+		if m.errOffset < maxOffset {
+			m.errOffset++
+		}
+	case msg.String() == "k" || msg.Type == tea.KeyUp || msg.Type == tea.KeyCtrlK:
+		if m.errOffset > 0 {
+			m.errOffset--
+		}
+	case msg.String() == "g":
+		m.errOffset = 0
+	case msg.String() == "G":
+		m.errOffset = maxOffset
+	}
 }
 
 func (m *JQLModal) handleListNav(msg tea.KeyMsg) {
@@ -301,30 +411,56 @@ func (m *JQLModal) handleListNav(msg tea.KeyMsg) {
 func (m *JQLModal) handleMouse(msg tea.MouseMsg) (JQLModal, tea.Cmd) {
 	switch {
 	case msg.Button == tea.MouseButtonWheelUp:
-		if m.offset > 0 {
+		if m.focus == jqlFocusError {
+			if m.errOffset > 0 {
+				m.errOffset--
+			}
+		} else if m.offset > 0 {
 			m.offset--
 		}
 	case msg.Button == tea.MouseButtonWheelDown:
+		if m.focus == jqlFocusError {
+			if m.errOffset < m.maxErrorOffset() {
+				m.errOffset++
+			}
+			break
+		}
 		maxOffset := max(len(m.items)-m.listHeight(), 0)
 		if m.offset < maxOffset {
 			m.offset++
 		}
 	case msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress:
-		listTop := 5
-		if m.errorMsg != "" {
-			listTop++
-		}
-		listH := m.listHeight()
-		relY := msg.Y - listTop
-		if relY >= 0 && relY < listH {
-			idx := m.offset + relY
-			if idx < len(m.items) {
-				m.cursor = idx
-				m.focusInput = false
-			}
-		}
+		m.handleClick(msg.Y)
 	}
 	return *m, nil
+}
+
+// handleClick moves focus and selection to the panel row under y. The error
+// panel occupies its height plus two border lines when present.
+func (m *JQLModal) handleClick(y int) {
+	const errTop = 5
+
+	eh := m.errorHeight()
+	if eh > 0 {
+		if rel := y - errTop; rel >= 0 && rel < eh {
+			m.focus = jqlFocusError
+			return
+		}
+	}
+
+	listTop := errTop
+	if eh > 0 {
+		listTop += eh + 2
+	}
+	listH := m.listHeight()
+	relY := y - listTop
+	if relY >= 0 && relY < listH {
+		idx := m.offset + relY
+		if idx < len(m.items) {
+			m.cursor = idx
+			m.focus = jqlFocusList
+		}
+	}
 }
 
 var jqlOperators = map[string]bool{
@@ -415,7 +551,7 @@ func (m *JQLModal) Render(bg string, w, h int) string {
 
 // SelectedSuggestion returns the currently selected suggestion in autocomplete mode
 func (m *JQLModal) SelectedSuggestion() string {
-	if m.mode != jqlModeAutocomplete || m.focusInput {
+	if m.mode != jqlModeAutocomplete || m.focus != jqlFocusList {
 		return ""
 	}
 	if m.cursor >= 0 && m.cursor < len(m.items) {
@@ -439,13 +575,7 @@ func (m *JQLModal) View() string {
 	if m.loading {
 		inputContent += lipgloss.NewStyle().Foreground(theme.ColorYellow).Render("  Searching...")
 	}
-	inputPanel := RenderPanelFull("JQL Query", "", inputContent, m.width-2, inputLines, m.focusInput, nil)
-
-	errorLine := ""
-	if m.errorMsg != "" {
-		errStyle := lipgloss.NewStyle().Foreground(theme.ColorRed).Bold(true)
-		errorLine = " " + errStyle.Render(m.errorMsg)
-	}
+	inputPanel := RenderPanelFull("JQL Query", "", inputContent, m.width-2, inputLines, m.focus == jqlFocusInput, nil)
 
 	listH := m.listHeight()
 	listContent := m.renderListContent(listH, contentW)
@@ -459,12 +589,12 @@ func (m *JQLModal) View() string {
 		listFooter = fmt.Sprintf("%d of %d", m.cursor+1, len(m.items))
 	}
 	scroll := &ScrollInfo{Total: len(m.items), Visible: listH, Offset: m.offset}
-	listPanel := RenderPanelFull(listTitle, listFooter, listContent, m.width-2, listH, !m.focusInput, scroll)
+	listPanel := RenderPanelFull(listTitle, listFooter, listContent, m.width-2, listH, m.focus == jqlFocusList, scroll)
 
 	var parts []string
 	parts = append(parts, inputPanel)
-	if errorLine != "" {
-		parts = append(parts, errorLine)
+	if eh := m.errorHeight(); eh > 0 {
+		parts = append(parts, m.renderErrorPanel(eh))
 	}
 	parts = append(parts, listPanel)
 	inner := strings.Join(parts, "\n")
@@ -483,6 +613,33 @@ func (m *JQLModal) View() string {
 	b.WriteString(bottomLine)
 
 	return b.String()
+}
+
+// renderErrorPanel draws the visible slice of the wrapped error. Jira's own
+// messages are highlighted; the request that produced them is dimmed.
+func (m *JQLModal) renderErrorPanel(h int) string {
+	msgStyle := lipgloss.NewStyle().Foreground(theme.ColorRed).Bold(true)
+	reqStyle := lipgloss.NewStyle().Foreground(theme.ColorGray)
+
+	end := min(m.errOffset+h, len(m.errWrapped))
+	rows := make([]string, 0, h)
+	for i := m.errOffset; i < end; i++ {
+		style := reqStyle
+		if i < m.errHeadLines {
+			style = msgStyle
+		}
+		rows = append(rows, style.Render(" "+m.errWrapped[i]))
+	}
+	for len(rows) < h {
+		rows = append(rows, "")
+	}
+
+	footer := ""
+	if len(m.errWrapped) > h {
+		footer = fmt.Sprintf("%d-%d of %d", m.errOffset+1, end, len(m.errWrapped))
+	}
+	scroll := &ScrollInfo{Total: len(m.errWrapped), Visible: h, Offset: m.errOffset}
+	return RenderPanelFull("Error", footer, strings.Join(rows, "\n"), m.width-2, h, m.focus == jqlFocusError, scroll)
 }
 
 func (m *JQLModal) renderListContent(listH, contentW int) string {
@@ -510,7 +667,7 @@ func (m *JQLModal) renderListContent(listH, contentW int) string {
 			if len(item) > iw {
 				item = item[:iw]
 			}
-			if i == m.cursor && !m.focusInput {
+			if i == m.cursor && m.focus == jqlFocusList {
 				row := lipgloss.NewStyle().
 					Background(theme.ColorHighlight).
 					Width(contentW).

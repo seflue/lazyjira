@@ -1,6 +1,7 @@
 package components
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
@@ -123,5 +124,82 @@ func TestPanelDimensions(t *testing.T) {
 			testkit.AssertEqual(t, "contentWidth", contentWidth, tt.wantContentWidth)
 			testkit.AssertEqual(t, "innerHeight", innerHeight, tt.wantInnerHeight)
 		})
+	}
+}
+
+func TestWrapSegments(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		input string
+		width int
+		want  []string
+	}{
+		{
+			name:  "prose wraps at spaces",
+			input: "Field 'sprintt' does not exist",
+			width: 16,
+			want:  []string{"Field 'sprintt' ", "does not exist"},
+		},
+		{
+			name:  "query params break before ampersand",
+			input: "GET /search?jql=a&startAt=0&maxResults=50",
+			width: 20,
+			want:  []string{"GET /search?jql=a", "&startAt=0", "&maxResults=50"},
+		},
+		{
+			name:  "field list breaks after comma",
+			input: "&fields=summary,status,priority",
+			width: 16,
+			want:  []string{"&fields=summary,", "status,priority"},
+		},
+		{
+			name:  "short input stays on one line",
+			input: "boom",
+			width: 20,
+			want:  []string{"boom"},
+		},
+		{
+			name:  "empty input yields nothing",
+			input: "",
+			width: 20,
+			want:  nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := WrapSegments(tt.input, tt.width)
+			if len(got) != len(tt.want) {
+				t.Fatalf("WrapSegments(%q, %d) = %q, want %q", tt.input, tt.width, got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("line %d = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestWrapSegments_RespectsWidth(t *testing.T) {
+	t.Parallel()
+	long := "?jql=" + strings.Repeat("a", 100)
+	for _, line := range WrapSegments(long, 20) {
+		if len([]rune(line)) > 20 {
+			t.Errorf("line %q exceeds width 20", line)
+		}
+	}
+}
+
+func TestWrapSegments_NeverSplitsPercentEscape(t *testing.T) {
+	t.Parallel()
+	// A single unbreakable segment of percent-escaped spaces.
+	input := "?jql=" + strings.Repeat("%20", 40)
+	for _, line := range WrapSegments(input, 22) {
+		if strings.HasSuffix(line, "%") || strings.HasSuffix(line, "%2") {
+			t.Errorf("line %q ends inside a percent-escape", line)
+		}
 	}
 }
