@@ -2,6 +2,7 @@ package jira
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 )
@@ -57,4 +58,29 @@ func parseErrorMessages(body string) []string {
 	}
 
 	return messages
+}
+
+// ErrorDetail is a failed request broken into its display parts. Messages holds
+// the user-facing text Jira returned and is empty when the response carried no
+// error envelope; Request and Body describe the exchange itself.
+type ErrorDetail struct {
+	Messages []string
+	Request  string
+	Status   int
+	Body     string
+}
+
+// DescribeError splits err into its display parts. Anything that is not an
+// *APIError becomes a single message, since its text is already user-facing.
+func DescribeError(err error) ErrorDetail {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		return ErrorDetail{Messages: []string{err.Error()}}
+	}
+	return ErrorDetail{
+		Messages: apiErr.Messages,
+		Request:  apiErr.Method + " " + apiErr.Path,
+		Status:   apiErr.Status,
+		Body:     apiErr.Body,
+	}
 }

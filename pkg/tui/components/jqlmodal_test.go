@@ -44,7 +44,7 @@ func TestJQLModal_HistorySelectionPreservesNewlines(t *testing.T) {
 	m.SetSize(80, 24)
 	multi := "project = FOO\nAND status = Open"
 	m.Show("", []string{multi})
-	m.focusInput = false
+	m.focus = jqlFocusList
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	testkit.AssertEqual(t, "selection keeps newlines", updated.InputValue(), multi)
 }
@@ -90,8 +90,9 @@ func TestJQLModal_SetError(t *testing.T) {
 	t.Parallel()
 	m := NewJQLModal()
 	m.SetLoading(true)
-	m.SetError("something went wrong")
-	testkit.AssertEqual(t, "error set", m.errorMsg, "something went wrong")
+	m.SetError([]string{"something went wrong"})
+	testkit.AssertEqual(t, "error set", m.errLines[0], "something went wrong")
+	testkit.AssertEqual(t, "error shown", m.HasError(), true)
 	testkit.AssertEqual(t, "loading cleared", m.loading, false)
 }
 
@@ -216,7 +217,7 @@ func TestJQLModal_ViewWithError(t *testing.T) {
 	m := NewJQLModal()
 	m.SetSize(80, 24)
 	m.Show("", nil)
-	m.SetError("bad query")
+	m.SetError([]string{"bad query"})
 	out := m.View()
 	plain := stripANSI(out)
 	if !strings.Contains(plain, "bad query") {
@@ -333,11 +334,11 @@ func TestJQLModal_TabTogglesFocus(t *testing.T) {
 	m := NewJQLModal()
 	m.SetSize(80, 24)
 	m.Show("", []string{testHistoryItem1})
-	testkit.AssertEqual(t, "initially focus input", m.focusInput, true)
+	testkit.AssertEqual(t, "initially focus input", m.focus, jqlFocusInput)
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	testkit.AssertEqual(t, "focus moved to list", m.focusInput, false)
+	testkit.AssertEqual(t, "focus moved to list", m.focus, jqlFocusList)
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	testkit.AssertEqual(t, "focus returned to input", m.focusInput, true)
+	testkit.AssertEqual(t, "focus returned to input", m.focus, jqlFocusInput)
 }
 
 func TestJQLModal_TabInsertsSuggestionWhenOnlyOne(t *testing.T) {
@@ -347,7 +348,7 @@ func TestJQLModal_TabInsertsSuggestionWhenOnlyOne(t *testing.T) {
 	m.Show("status", nil)
 	m.SetSuggestions([]string{"status = Open"})
 	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	testkit.AssertEqual(t, "still focus input", m.focusInput, true)
+	testkit.AssertEqual(t, "still focus input", m.focus, jqlFocusInput)
 	if cmd == nil {
 		t.Fatal("expected changed command")
 	}
@@ -414,7 +415,7 @@ func TestJQLModal_EnterOnHistoryItemSetsInput(t *testing.T) {
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	testkit.AssertEqual(t, "input set to history item", m.InputValue(), testHistoryItem1)
-	testkit.AssertEqual(t, "focus returned to input", m.focusInput, true)
+	testkit.AssertEqual(t, "focus returned to input", m.focus, jqlFocusInput)
 }
 
 func TestJQLModal_EnterOnSuggestionInsertsIt(t *testing.T) {
@@ -425,7 +426,7 @@ func TestJQLModal_EnterOnSuggestionInsertsIt(t *testing.T) {
 	m.SetSuggestions([]string{"status = Open", "status = Closed"})
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	testkit.AssertEqual(t, "focus returned to input", m.focusInput, true)
+	testkit.AssertEqual(t, "focus returned to input", m.focus, jqlFocusInput)
 	if cmd == nil {
 		t.Fatal("expected command from autocomplete insert")
 	}
@@ -441,7 +442,7 @@ func TestJQLModal_EscFromListReturnsFocusToInput(t *testing.T) {
 	m.Show("", []string{testHistoryItem1})
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	testkit.AssertEqual(t, "focus back to input", m.focusInput, true)
+	testkit.AssertEqual(t, "focus back to input", m.focus, jqlFocusInput)
 	testkit.AssertEqual(t, "still visible", m.IsVisible(), true)
 }
 
@@ -486,7 +487,7 @@ func TestJQLModal_MouseClickSelectsItem(t *testing.T) {
 		X:      5,
 		Y:      6,
 	})
-	testkit.AssertEqual(t, "focus moved to list", m.focusInput, false)
+	testkit.AssertEqual(t, "focus moved to list", m.focus, jqlFocusList)
 }
 
 func TestJQLModal_InterceptConsumesKeyWhenVisible(t *testing.T) {
@@ -556,12 +557,14 @@ func TestJQLModal_LoadingBlocksSubmit(t *testing.T) {
 	testkit.AssertEqual(t, "still visible while loading", m.IsVisible(), true)
 }
 
-func TestJQLModal_ErrorClearedOnTyping(t *testing.T) {
+func TestJQLModal_ErrorPersistsThroughTyping(t *testing.T) {
 	t.Parallel()
 	m := NewJQLModal()
 	m.SetSize(80, 24)
 	m.Show("query", nil)
-	m.SetError("oops")
+	m.SetError([]string{"oops"})
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
-	testkit.AssertEqual(t, "error cleared on typing", m.errorMsg, "")
+	testkit.AssertEqual(t, "error kept while editing", m.HasError(), true)
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	testkit.AssertEqual(t, "error kept while navigating", m.HasError(), true)
 }

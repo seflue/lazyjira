@@ -185,7 +185,7 @@ type jqlSearchResultMsg struct {
 	issues []jira.Issue
 	jql    string
 }
-type jqlSearchErrorMsg struct{ err string }
+type jqlSearchErrorMsg struct{ err error }
 
 // JQL autocomplete messages
 type jqlFieldsLoadedMsg struct{ fields []jira.AutocompleteField }
@@ -195,7 +195,7 @@ func fetchJQLSearch(client jira.ClientInterface, jql string, maxResults int) tea
 	return func() tea.Msg {
 		result, err := client.SearchIssues(context.Background(), jql, 0, maxResults)
 		if err != nil {
-			return jqlSearchErrorMsg{err: err.Error()}
+			return jqlSearchErrorMsg{err: err}
 		}
 		return jqlSearchResultMsg{issues: result.Issues, jql: jql}
 	}

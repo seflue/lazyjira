@@ -60,7 +60,7 @@ func (a *App) handleJQLSearchResult(msg jqlSearchResultMsg) (tea.Model, tea.Cmd)
 // handleJQLSearchError shows error in JQL modal.
 func (a *App) handleJQLSearchError(msg jqlSearchErrorMsg) (tea.Model, tea.Cmd) {
 	*a.logFlag = false
-	a.jqlModal.SetError(msg.err)
+	a.jqlModal.SetError(formatJQLError(msg.err))
 	return a, nil
 }
 

@@ -59,7 +59,7 @@ func TestHandleJQLSearchError_ShowsErrorInModal(t *testing.T) {
 	app := jqlApp(t)
 	app.jqlModal.Show("", nil)
 
-	_, _ = app.handleJQLSearchError(jqlSearchErrorMsg{err: "bad jql"})
+	_, _ = app.handleJQLSearchError(jqlSearchErrorMsg{err: errors.New("bad jql")})
 
 	if !app.jqlModal.IsVisible() {
 		t.Error("modal should remain visible after error")
