@@ -34,28 +34,28 @@ func (a *App) handleSearchChanged(msg components.SearchChangedMsg) (tea.Model, t
 	return a, nil
 }
 
-// handleSearchConfirmed finalizes search: selects the filtered item and loads data.
+// handleSearchConfirmed finalizes search: keeps every panel's filter active
+// (lazygit-style persistent filter) and syncs the preview to the current
+// selection where the panel has one. Confirming never acts on the
+// selection -- that's the panel's normal open/select action (e.g. Enter),
+// available once the search bar has deactivated.
 func (a *App) handleSearchConfirmed() (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	switch {
 	case a.side == sideLeft && a.leftFocus == focusIssues:
-		selectedIssue := a.issuesList.SelectedIssue()
-		a.issuesList.ClearFilter()
-		if selectedIssue != nil {
+		if selectedIssue := a.issuesList.SelectedIssue(); selectedIssue != nil {
 			if _, cmd := a.Update(views.IssueSelectedMsg{Issue: selectedIssue}); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
 		}
 	case a.side == sideLeft && a.leftFocus == focusInfo:
-		a.infoPanel.ClearFilter()
+		// No separate preview to sync; the panel itself is the filtered view.
 	case a.side == sideLeft && a.leftFocus == focusProjects:
-		if p := a.projectList.SelectedProject(); p != nil {
-			if cmd := a.selectProject(p); cmd != nil {
+		if selectedProject := a.projectList.SelectedProject(); selectedProject != nil {
+			if _, cmd := a.Update(views.ProjectHoveredMsg{Project: selectedProject}); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
-			cmds = append(cmds, a.fetchActiveTab())
 		}
-		a.projectList.SetFilter("")
 	}
 	return a, tea.Batch(cmds...)
 }
@@ -66,6 +66,34 @@ func (a *App) handleSearchCancelled() (tea.Model, tea.Cmd) {
 	a.infoPanel.SetFilter("")
 	a.projectList.SetFilter("")
 	return a, nil
+}
+
+// clearFocusedFilter clears an active search filter on the focused left-side
+// panel and reports whether it did anything. Used so Esc cancels a persistent
+// filter (lazygit-style) before falling back to normal navigation, and so
+// reopening the search bar starts from a clean, unfiltered list.
+func (a *App) clearFocusedFilter() bool {
+	if a.side != sideLeft {
+		return false
+	}
+	switch a.leftFocus {
+	case focusIssues:
+		if a.issuesList.HasFilter() {
+			a.issuesList.SetFilter("")
+			return true
+		}
+	case focusInfo:
+		if a.infoPanel.HasFilter() {
+			a.infoPanel.SetFilter("")
+			return true
+		}
+	case focusProjects:
+		if a.projectList.HasFilter() {
+			a.projectList.SetFilter("")
+			return true
+		}
+	}
+	return false
 }
 
 // handleAutoFetch re-fetches issues on a timer.

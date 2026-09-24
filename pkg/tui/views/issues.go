@@ -347,6 +347,9 @@ func (m *IssuesList) SetFilter(query string) {
 	m.applyFilter()
 }
 
+// HasFilter reports whether a search filter is currently applied.
+func (m *IssuesList) HasFilter() bool { return m.filter != "" }
+
 // ClearFilter removes the search filter and preserves cursor position
 func (m *IssuesList) ClearFilter() {
 	m.filter = ""

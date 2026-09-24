@@ -45,6 +45,9 @@ func (p *ProjectList) SetFilter(query string) {
 	p.applyFilter()
 }
 
+// HasFilter reports whether a search filter is currently applied.
+func (p *ProjectList) HasFilter() bool { return p.filter != "" }
+
 func (p *ProjectList) applyFilter() {
 	if p.filter == "" {
 		p.projects = p.pinActive(p.allProjects)
