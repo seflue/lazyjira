@@ -1,11 +1,9 @@
 package tui
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"strings"
-	"text/template"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -51,33 +49,6 @@ func gitCheckoutTracking(repoPath, remoteBranch string) tea.Cmd {
 		}
 		return gitCheckoutDoneMsg{name: name}
 	}
-}
-
-func fetchIssuesByJQL(client jira.ClientInterface, jql string, tab, maxResults, epoch int) tea.Cmd {
-	return func() tea.Msg {
-		result, err := client.SearchIssues(context.Background(), jql, 0, maxResults)
-		if err != nil {
-			return errorMsg{err: err}
-		}
-		return issuesLoadedMsg{issues: result.Issues, tab: tab, epoch: epoch}
-	}
-}
-
-// resolveTabJQL applies template variables to a tab's JQL string.
-func resolveTabJQL(tab config.IssueTabConfig, projectKey, email string) string {
-	tmpl, err := template.New("jql").Parse(tab.JQL)
-	if err != nil {
-		return fmt.Sprintf("project = \"%s\" ORDER BY updated DESC", projectKey)
-	}
-	data := struct {
-		ProjectKey string
-		UserEmail  string
-	}{ProjectKey: "\"" + projectKey + "\"", UserEmail: email}
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
-		return fmt.Sprintf("project = \"%s\" ORDER BY updated DESC", projectKey)
-	}
-	return buf.String()
 }
 
 // fetchFullIssue fetches issue + comments + changelog, returning the given message type.
@@ -181,27 +152,9 @@ func doTransition(client jira.ClientInterface, key, transitionID string) tea.Cmd
 }
 
 // JQL search messages
-type jqlSearchResultMsg struct {
-	issues []jira.Issue
-	jql    string
-}
-type jqlSearchErrorMsg struct{ err error }
-
 // JQL autocomplete messages
 type jqlFieldsLoadedMsg struct{ fields []jira.AutocompleteField }
 type jqlSuggestionsMsg struct{ suggestions []jira.AutocompleteSuggestion }
-
-// fetchJQLSearch runs resolvedJQL but reports query, the text as typed, so a
-// stored query keeps its template variables.
-func fetchJQLSearch(client jira.ClientInterface, query, resolvedJQL string, maxResults int) tea.Cmd {
-	return func() tea.Msg {
-		result, err := client.SearchIssues(context.Background(), resolvedJQL, 0, maxResults)
-		if err != nil {
-			return jqlSearchErrorMsg{err: err}
-		}
-		return jqlSearchResultMsg{issues: result.Issues, jql: query}
-	}
-}
 
 func fetchJQLAutocompleteData(client jira.ClientInterface) tea.Cmd {
 	return func() tea.Msg {

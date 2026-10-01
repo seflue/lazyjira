@@ -95,11 +95,6 @@ type createCtx struct {
 type onSelectFunc func(components.ModalItem) tea.Cmd
 type onChecklistFunc func([]components.ModalItem) tea.Cmd
 
-type issuesLoadedMsg struct {
-	issues []jira.Issue
-	tab    int
-	epoch  int
-}
 type issueDetailLoadedMsg struct{ issue *jira.Issue }
 
 // previewDetailLoadedMsg carries the response of a preview-triggered fetch.
@@ -229,6 +224,10 @@ type App struct {
 	// editingManagedTab is the store index whose query an open JQL modal will
 	// overwrite on submit, or -1 when the modal performs a fresh search.
 	editingManagedTab int
+
+	// modalRun counts query runs started from the JQL modal and its cancels; a
+	// modal result whose run number is not current is dropped.
+	modalRun int
 
 	panelSideW     int
 	panelStatusH   int
@@ -498,8 +497,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case autoFetchTickMsg:
 		return a.handleAutoFetch()
-	case issuesLoadedMsg:
-		return a.handleIssuesLoaded(msg)
+	case queryResultMsg:
+		return a.finishRun(msg)
 	case issueDetailLoadedMsg:
 		return a.handleIssueDetailLoaded(msg)
 	case issuePrefetchedMsg:
@@ -603,12 +602,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.handleJQLSubmit(msg)
 	case components.JQLSaveTabMsg:
 		return a.handleJQLSaveTab(msg)
-	case jqlSearchResultMsg:
-		return a.handleJQLSearchResult(msg)
-	case jqlSearchErrorMsg:
-		return a.handleJQLSearchError(msg)
 	case components.JQLCancelMsg:
 		a.editingManagedTab = -1
+		a.modalRun++
 		return a, nil
 	case components.JQLInputChangedMsg:
 		return a.handleJQLInputChanged(msg)
@@ -1177,26 +1173,16 @@ func (a *App) handleGitBranchSwitch(name string) (tea.Model, tea.Cmd) {
 }
 
 func (a *App) fetchActiveTab() tea.Cmd {
+	query := a.issuesList.ActiveTab().JQL
 	if a.issuesList.IsJQLTab() {
-		jql := a.issuesList.JQLQuery()
-		if jql == "" {
-			return nil
-		}
-		tabIdx := a.issuesList.GetTabIndex()
-		*a.logFlag = true
-		return fetchIssuesByJQL(a.client, jql, tabIdx, a.cfg.ResolveGlobalMaxResults(), a.issuesList.TabEpoch())
-	}
-	if a.projectKey == "" {
+		query = a.issuesList.JQLQuery()
+	} else if a.projectKey == "" {
 		return nil
 	}
-	tab := a.issuesList.ActiveTab()
-	if tab.JQL == "" {
+	if query == "" {
 		return nil
 	}
-	tabIdx := a.issuesList.GetTabIndex()
-	jql := resolveTabJQL(tab, a.projectKey, a.cfg.Jira.Email)
-	*a.logFlag = true
-	return fetchIssuesByJQL(a.client, jql, tabIdx, a.cfg.ResolveMaxResults(tab), a.issuesList.TabEpoch())
+	return a.startRun(queryRun{origin: originTab, query: query, tab: a.issuesList.GetTabIndex(), epoch: a.issuesList.TabEpoch()})
 }
 
 func (a *App) updateFocusState() {

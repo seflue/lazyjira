@@ -3,22 +3,17 @@ package tui
 import (
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/textfuel/lazyjira/v2/pkg/config"
 	"github.com/textfuel/lazyjira/v2/pkg/tui/components"
 )
 
-// handleJQLSubmit starts a JQL search. An in-place edit of a managed tab runs
-// like a fetch of that tab: template variables resolved, the tab's page size.
+// handleJQLSubmit runs the modal's query, as an in-place edit when the modal
+// was opened on a managed tab.
 func (a *App) handleJQLSubmit(msg components.JQLSubmitMsg) (tea.Model, tea.Cmd) {
-	*a.logFlag = true
-	a.jqlModal.SetLoading(true)
-	jql, maxResults := msg.Query, a.cfg.ResolveGlobalMaxResults()
+	run := queryRun{origin: originSearch, query: msg.Query}
 	if idx := a.editingManagedTab; idx >= 0 && idx < len(a.savedTabs) {
-		tab := config.IssueTabConfig{Name: a.savedTabs[idx].Name, JQL: msg.Query, MaxResults: a.savedTabs[idx].MaxResults}
-		jql = resolveTabJQL(tab, a.projectKey, a.cfg.Jira.Email)
-		maxResults = a.cfg.ResolveMaxResults(tab)
+		run.origin, run.managedTab = originEdit, idx
 	}
-	return a, fetchJQLSearch(a.client, msg.Query, jql, maxResults)
+	return a, a.startRun(run)
 }
 
 // handleJQLSaveTab hides the JQL modal and opens the name prompt to persist the
@@ -29,45 +24,6 @@ func (a *App) handleJQLSaveTab(msg components.JQLSaveTabMsg) (tea.Model, tea.Cmd
 	a.editingManagedTab = -1
 	a.inputModal.Show("Save tab", "")
 	a.editContext = editCtx{kind: editTabName, tabJQL: msg.Query, returnToJQLModal: true, prevEditingManagedTab: prev}
-	return a, nil
-}
-
-// handleJQLSearchResult processes JQL search results. When the search was an
-// in-place edit of a managed tab (editingManagedTab set), it overwrites that
-// store entry's query instead of opening a transient JQL tab.
-func (a *App) handleJQLSearchResult(msg jqlSearchResultMsg) (tea.Model, tea.Cmd) {
-	*a.logFlag = false
-	a.jqlModal.Hide()
-	history := LoadJQLHistory()
-	history = AddToHistory(history, msg.jql)
-	_ = SaveJQLHistory(history)
-	if idx := a.editingManagedTab; idx >= 0 && idx < len(a.savedTabs) {
-		a.savedTabs[idx].JQL = msg.jql
-		if err := config.SaveSavedTabs(a.savedTabs); err != nil {
-			a.helpBar.SetStatusMsg("save tabs: " + err.Error())
-		}
-		a.issuesList.SetSavedTabs(a.savedTabs)
-		a.jumpToManagedTab(a.savedTabs[idx].Name)
-		a.issuesList.SetIssues(msg.issues)
-		a.editingManagedTab = -1
-	} else {
-		a.issuesList.AddJQLTab(msg.jql)
-		a.issuesList.SetIssues(msg.issues)
-	}
-	a.side = sideLeft
-	a.leftFocus = focusIssues
-	a.updateFocusState()
-	cmds := make([]tea.Cmd, 0, len(msg.issues))
-	for _, issue := range msg.issues {
-		cmds = append(cmds, prefetchIssue(a.client, issue.Key))
-	}
-	return a, tea.Batch(cmds...)
-}
-
-// handleJQLSearchError shows error in JQL modal.
-func (a *App) handleJQLSearchError(msg jqlSearchErrorMsg) (tea.Model, tea.Cmd) {
-	*a.logFlag = false
-	a.jqlModal.SetError(formatJQLError(msg.err))
 	return a, nil
 }
 

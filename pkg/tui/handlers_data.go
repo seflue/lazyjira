@@ -14,24 +14,24 @@ import (
 	"github.com/textfuel/lazyjira/v2/pkg/tui/components"
 )
 
-// handleIssuesLoaded processes newly fetched issues
-func (a *App) handleIssuesLoaded(msg issuesLoadedMsg) (tea.Model, tea.Cmd) {
-	if msg.epoch != a.issuesList.TabEpoch() {
+// handleTabIssues shows the issues a tab fetch returned.
+func (a *App) handleTabIssues(run queryRun, issues []jira.Issue) (tea.Model, tea.Cmd) {
+	if run.epoch != a.issuesList.TabEpoch() {
 		return a, nil // stale: tabs were reassembled after this fetch was issued
 	}
 	a.statusPanel.SetError("")
 	*a.logFlag = false
 	a.statusPanel.SetOnline(true)
-	a.issuesList.SetIssuesForTab(msg.tab, msg.issues)
+	a.issuesList.SetIssuesForTab(run.tab, issues)
 
 	var cmds []tea.Cmd
-	if msg.tab == a.issuesList.GetTabIndex() {
-		a.issuesList.SetIssues(msg.issues)
-		for _, issue := range msg.issues {
+	if run.tab == a.issuesList.GetTabIndex() {
+		a.issuesList.SetIssues(issues)
+		for _, issue := range issues {
 			cmds = append(cmds, prefetchIssue(a.client, issue.Key))
 		}
 	}
-	if msg.tab == a.issuesList.GetTabIndex() && a.side == sideLeft && a.leftFocus == focusIssues {
+	if run.tab == a.issuesList.GetTabIndex() && a.side == sideLeft && a.leftFocus == focusIssues {
 		if cmd := a.previewSelectedIssue(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -483,9 +483,9 @@ func (a *App) handleCreateMetaLoaded(msg createMetaLoadedMsg) (tea.Model, tea.Cm
 	if a.cfg.GUI.ShouldPrefillFromTab() {
 		tab := a.issuesList.ActiveTab()
 		if tab.JQL != "" {
-			jql := resolveTabJQL(tab, a.projectKey, a.cfg.Jira.Email)
-			prefill := ParseJQLPrefill(jql)
-			ApplyPrefill(fields, prefill, a.currentUser, a.isCloud)
+			if jql, err := resolveQuery(tab.JQL, queryVars{project: a.projectKey, email: a.cfg.Jira.Email}); err == nil {
+				ApplyPrefill(fields, ParseJQLPrefill(jql), a.currentUser, a.isCloud)
+			}
 		}
 	}
 

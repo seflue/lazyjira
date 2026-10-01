@@ -10,8 +10,9 @@ import (
 const savedTabsFile = "saved_tabs.yml"
 
 // ManagedTab is a TUI-managed issue tab persisted in saved_tabs.yml. Unlike
-// IssueTabConfig (hand-edited templates in config.yml), a managed tab holds a
-// concrete JQL query bound to a project (empty Project means global).
+// IssueTabConfig (hand-edited in config.yml), it is created and edited from the
+// TUI. Its query may use the same template variables and is bound to a project
+// (empty Project means global).
 type ManagedTab struct {
 	Name       string `yaml:"name"`
 	JQL        string `yaml:"jql"`

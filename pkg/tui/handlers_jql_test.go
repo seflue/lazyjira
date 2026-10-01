@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/textfuel/lazyjira/v2/pkg/internal/testkit"
 	"github.com/textfuel/lazyjira/v2/pkg/jira"
 	"github.com/textfuel/lazyjira/v2/pkg/jira/jiratest"
 	"github.com/textfuel/lazyjira/v2/pkg/tui/components"
@@ -19,55 +18,6 @@ func jqlApp(t *testing.T) *App {
 	app.width = 120
 	app.height = 40
 	return app
-}
-
-func TestHandleJQLSubmit_SetsLoadingAndReturnsCmd(t *testing.T) {
-	t.Parallel()
-	fake := &jiratest.FakeClient{T: t}
-	fake.SearchIssuesFunc = func(_ context.Context, _ string, _, _ int) (*jira.SearchResult, error) {
-		return &jira.SearchResult{}, nil
-	}
-	app := jqlApp(t)
-	app.client = fake
-
-	_, cmd := app.handleJQLSubmit(components.JQLSubmitMsg{Query: "project = X"})
-
-	if cmd == nil {
-		t.Fatal("expected a fetch cmd")
-	}
-}
-
-func TestHandleJQLSearchResult_AddsTabAndFocusesIssues(t *testing.T) {
-	t.Setenv("LAZYJIRA_CONFIG_DIR", t.TempDir())
-	app := jqlApp(t)
-	app.projectKey = testProject
-
-	_, _ = app.handleJQLSearchResult(jqlSearchResultMsg{
-		issues: []jira.Issue{{Key: testKey, Summary: testSummary}},
-		jql:    "project = " + testProject,
-	})
-
-	testkit.AssertEqual(t, "side", app.side, sideLeft)
-	testkit.AssertEqual(t, "leftFocus", app.leftFocus, focusIssues)
-	if !app.issuesList.IsJQLTab() {
-		t.Error("JQL tab should be added after search result")
-	}
-}
-
-func TestHandleJQLSearchError_ShowsErrorInModal(t *testing.T) {
-	t.Parallel()
-	app := jqlApp(t)
-	app.jqlModal.Show("", nil)
-
-	_, _ = app.handleJQLSearchError(jqlSearchErrorMsg{err: errors.New("bad jql")})
-
-	if !app.jqlModal.IsVisible() {
-		t.Error("modal should remain visible after error")
-	}
-	app.jqlModal.SetSize(80, 24)
-	if view := app.jqlModal.View(); !strings.Contains(view, "bad jql") {
-		t.Errorf("modal view should contain error text, got: %q", view)
-	}
 }
 
 func TestHandleJQLFieldsLoaded_CachesFields(t *testing.T) {

@@ -12,7 +12,7 @@ import (
 	"github.com/textfuel/lazyjira/v2/pkg/tui/components"
 )
 
-func TestHandleIssuesLoaded(t *testing.T) {
+func TestTabFetchResult(t *testing.T) {
 	t.Parallel()
 
 	t.Run("active tab populates list and marks online", func(t *testing.T) {
@@ -20,7 +20,7 @@ func TestHandleIssuesLoaded(t *testing.T) {
 		app := newAppWithFake(t, &jiratest.FakeClient{T: t})
 		app.statusPanel.SetError("stale")
 
-		_, cmd := app.handleIssuesLoaded(issuesLoadedMsg{tab: 0, issues: []jira.Issue{{Key: testKey}}})
+		_, cmd := app.Update(queryResultMsg{run: queryRun{origin: originTab}, issues: []jira.Issue{{Key: testKey}}})
 
 		if sel := app.issuesList.SelectedIssue(); sel == nil || sel.Key != testKey {
 			t.Errorf("selected issue = %v, want %s", sel, testKey)
@@ -40,7 +40,7 @@ func TestHandleIssuesLoaded(t *testing.T) {
 		app.projectKey = testProject
 		app.gitDetectedKey = testKey
 
-		_, _ = app.handleIssuesLoaded(issuesLoadedMsg{tab: 0, issues: []jira.Issue{{Key: testKey}}})
+		_, _ = app.Update(queryResultMsg{run: queryRun{origin: originTab}, issues: []jira.Issue{{Key: testKey}}})
 
 		if app.gitDetectedKey != "" {
 			t.Error("gitDetectedKey should clear once the issue is selected")

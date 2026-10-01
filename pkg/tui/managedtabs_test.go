@@ -111,12 +111,12 @@ func TestTabFetch_staleEpoch_dropped(t *testing.T) {
 		t.Fatal("RebuildTabs must bump the tab epoch")
 	}
 
-	app.handleIssuesLoaded(issuesLoadedMsg{tab: 0, issues: []jira.Issue{{Key: "PLAT-1"}}, epoch: staleEpoch})
+	app.Update(queryResultMsg{run: queryRun{origin: originTab, epoch: staleEpoch}, issues: []jira.Issue{{Key: "PLAT-1"}}})
 	if app.issuesList.HasCachedTab() {
 		t.Error("stale-epoch fetch result must be dropped, not stored")
 	}
 
-	app.handleIssuesLoaded(issuesLoadedMsg{tab: 0, issues: []jira.Issue{{Key: "PLAT-2"}}, epoch: freshEpoch})
+	app.Update(queryResultMsg{run: queryRun{origin: originTab, epoch: freshEpoch}, issues: []jira.Issue{{Key: "PLAT-2"}}})
 	if !app.issuesList.HasCachedTab() {
 		t.Error("current-epoch fetch result must be applied")
 	}

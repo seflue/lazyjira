@@ -338,7 +338,7 @@ Controls which columns appear in the issue list. Available fields.
 
 ## Issue tabs
 
-Define JQL-based tabs for the issue list. Template variables `{{.ProjectKey}}` and `{{.UserEmail}}` are expanded at runtime.
+Define JQL-based tabs for the issue list. Template variables `{{.ProjectKey}}` and `{{.UserEmail}}` are expanded at runtime. A query that cannot be expanded (a typo in a variable, or `{{.ProjectKey}}` with no project selected) is reported as an error and not sent to Jira.
 
 ```yaml
 issueTabs:
@@ -351,7 +351,7 @@ issueTabs:
     maxResults: 100
 ```
 
-You can also create temporary JQL tabs at runtime with the `s` key.
+You can also create temporary JQL tabs at runtime with the `s` key. Queries typed there may use the same template variables.
 
 Per-tab page size can be set via `maxResults` on the tab entry — see [Page size](#page-size-maxresults) below.
 
@@ -381,7 +381,7 @@ There are two sources of tabs:
 | Source | File | Edited via | Templates |
 |--------|------|------------|-----------|
 | Config tabs | `config.yml` `issueTabs` | hand-edited (read-only from the TUI) | yes (`{{.ProjectKey}}`) |
-| Managed tabs | `saved_tabs.yml` | created, deleted, reordered in the TUI | no (concrete JQL) |
+| Managed tabs | `saved_tabs.yml` | created, deleted, reordered in the TUI | yes (`{{.ProjectKey}}`) |
 
 You normally do not edit `saved_tabs.yml` by hand. It is written by the Save, Delete, Promote, and Reorder actions (see [Keybindings](Keybindings.md#issues)). The format is an ordered list, and the list order is the tab order shown in the bar:
 

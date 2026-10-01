@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"context"
 	"testing"
 
 	"github.com/textfuel/lazyjira/v2/pkg/config"
@@ -39,10 +38,8 @@ func TestEditManagedTab_updatesQueryInPlace(t *testing.T) {
 		t.Errorf("prefill = %q, want %q", got, "old query")
 	}
 
-	app.handleJQLSearchResult(jqlSearchResultMsg{
-		jql:    "new query",
-		issues: []jira.Issue{{Key: "ABC-9", Summary: "s"}},
-	})
+	app.client = searchFake(t, jira.Issue{Key: "ABC-9", Summary: "s"})
+	submitJQL(app, "new query")
 
 	if app.savedTabs[0].JQL != "new query" {
 		t.Errorf("store JQL = %q, want new query", app.savedTabs[0].JQL)
@@ -70,14 +67,11 @@ func TestEditManagedTab_runsResolvedQueryWithTabPageSize(t *testing.T) {
 	pageSize := 7
 	app.savedTabs[0].MaxResults = &pageSize
 	app.issuesList.SetSavedTabs(app.savedTabs)
-	fake := &jiratest.FakeClient{T: t, SearchIssuesFunc: func(context.Context, string, int, int) (*jira.SearchResult, error) {
-		return &jira.SearchResult{Issues: []jira.Issue{{Key: "ABC-1"}}}, nil
-	}}
+	fake := searchFake(t, jira.Issue{Key: mainKey})
 	app.client = fake
 
 	app.handleTabAction(ActJQLSearch)
-	_, cmd := app.Update(components.JQLSubmitMsg{Query: app.jqlModal.InputValue()})
-	app.Update(cmd())
+	submitJQL(app, app.jqlModal.InputValue())
 
 	if len(fake.SearchIssuesCalls) != 1 {
 		t.Fatalf("SearchIssues calls = %d, want 1", len(fake.SearchIssuesCalls))

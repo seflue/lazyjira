@@ -136,7 +136,7 @@ func TestUpdate_RoutesDataMessages(t *testing.T) {
 			setup: func(app *App, fake *jiratest.FakeClient) {
 				stubFullIssueFetch(fake, &jira.Issue{Key: testKey})
 			},
-			msg:     issuesLoadedMsg{issues: []jira.Issue{{Key: testKey}}, tab: 0},
+			msg:     queryResultMsg{run: queryRun{origin: originTab}, issues: []jira.Issue{{Key: testKey}}},
 			wantCmd: true,
 			assert: func(t *testing.T, app *App) {
 				t.Helper()
@@ -559,7 +559,7 @@ func TestUpdate_RoutesJQLAndNavMessages(t *testing.T) {
 		},
 		{
 			name: "jql search error sets modal error",
-			msg:  jqlSearchErrorMsg{err: errors.New("bad jql")},
+			msg:  queryResultMsg{run: queryRun{origin: originSearch}, err: errors.New("bad jql")},
 		},
 		{
 			name: "jql cancel is noop",
