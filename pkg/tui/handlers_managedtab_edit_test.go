@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"testing"
 
 	"github.com/textfuel/lazyjira/v2/pkg/config"
@@ -59,6 +60,37 @@ func TestEditManagedTab_updatesQueryInPlace(t *testing.T) {
 	}
 	if app.editingManagedTab != -1 {
 		t.Errorf("editingManagedTab should reset to -1, got %d", app.editingManagedTab)
+	}
+}
+
+func TestEditManagedTab_runsResolvedQueryWithTabPageSize(t *testing.T) {
+	t.Setenv("LAZYJIRA_CONFIG_DIR", t.TempDir())
+	const query = "project = {{.ProjectKey}} AND type = Bug"
+	app := newManagedTabApp(t, query)
+	pageSize := 7
+	app.savedTabs[0].MaxResults = &pageSize
+	app.issuesList.SetSavedTabs(app.savedTabs)
+	fake := &jiratest.FakeClient{T: t, SearchIssuesFunc: func(context.Context, string, int, int) (*jira.SearchResult, error) {
+		return &jira.SearchResult{Issues: []jira.Issue{{Key: "ABC-1"}}}, nil
+	}}
+	app.client = fake
+
+	app.handleTabAction(ActJQLSearch)
+	_, cmd := app.Update(components.JQLSubmitMsg{Query: app.jqlModal.InputValue()})
+	app.Update(cmd())
+
+	if len(fake.SearchIssuesCalls) != 1 {
+		t.Fatalf("SearchIssues calls = %d, want 1", len(fake.SearchIssuesCalls))
+	}
+	call := fake.SearchIssuesCalls[0]
+	if want := `project = "ABC" AND type = Bug`; call.JQL != want {
+		t.Errorf("sent JQL = %q, want %q", call.JQL, want)
+	}
+	if call.MaxResults != pageSize {
+		t.Errorf("sent maxResults = %d, want %d", call.MaxResults, pageSize)
+	}
+	if app.savedTabs[0].JQL != query {
+		t.Errorf("stored JQL = %q, want placeholder kept %q", app.savedTabs[0].JQL, query)
 	}
 }
 

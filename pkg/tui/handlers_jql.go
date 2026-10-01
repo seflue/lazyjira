@@ -7,11 +7,18 @@ import (
 	"github.com/textfuel/lazyjira/v2/pkg/tui/components"
 )
 
-// handleJQLSubmit starts a JQL search.
+// handleJQLSubmit starts a JQL search. An in-place edit of a managed tab runs
+// like a fetch of that tab: template variables resolved, the tab's page size.
 func (a *App) handleJQLSubmit(msg components.JQLSubmitMsg) (tea.Model, tea.Cmd) {
 	*a.logFlag = true
 	a.jqlModal.SetLoading(true)
-	return a, fetchJQLSearch(a.client, msg.Query, a.cfg.ResolveGlobalMaxResults())
+	jql, maxResults := msg.Query, a.cfg.ResolveGlobalMaxResults()
+	if idx := a.editingManagedTab; idx >= 0 && idx < len(a.savedTabs) {
+		tab := config.IssueTabConfig{Name: a.savedTabs[idx].Name, JQL: msg.Query, MaxResults: a.savedTabs[idx].MaxResults}
+		jql = resolveTabJQL(tab, a.projectKey, a.cfg.Jira.Email)
+		maxResults = a.cfg.ResolveMaxResults(tab)
+	}
+	return a, fetchJQLSearch(a.client, msg.Query, jql, maxResults)
 }
 
 // handleJQLSaveTab hides the JQL modal and opens the name prompt to persist the

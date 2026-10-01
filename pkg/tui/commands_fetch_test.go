@@ -67,7 +67,7 @@ func TestFetchJQLSearch(t *testing.T) {
 			return &jira.SearchResult{Issues: []jira.Issue{{Key: testKey}}}, nil
 		}
 
-		msg := fetchJQLSearch(fake, "project = PLAT", 25)()
+		msg := fetchJQLSearch(fake, "project = PLAT", "project = PLAT", 25)()
 
 		result, ok := msg.(jqlSearchResultMsg)
 		if !ok {
@@ -84,7 +84,7 @@ func TestFetchJQLSearch(t *testing.T) {
 		fake.SearchIssuesFunc = func(_ context.Context, _ string, _, _ int) (*jira.SearchResult, error) {
 			return nil, errors.New("bad jql")
 		}
-		if _, ok := fetchJQLSearch(fake, "x", 10)().(jqlSearchErrorMsg); !ok {
+		if _, ok := fetchJQLSearch(fake, "x", "x", 10)().(jqlSearchErrorMsg); !ok {
 			t.Error("want jqlSearchErrorMsg")
 		}
 	})
