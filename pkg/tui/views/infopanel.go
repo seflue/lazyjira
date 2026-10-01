@@ -151,6 +151,9 @@ func (p *InfoPanel) SetFilter(query string) {
 	p.filteredIndices = nil
 }
 
+// HasFilter reports whether a search filter is currently applied.
+func (p *InfoPanel) HasFilter() bool { return p.filter != "" }
+
 // ClearFilter removes the search filter preserving cursor on the same element
 func (p *InfoPanel) ClearFilter() {
 	origIdx := p.resolveOriginalIndex()

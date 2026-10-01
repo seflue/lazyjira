@@ -29,9 +29,13 @@ func (a *App) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	action := a.keymap.Match(msg.String())
 
-	// In the hierarchy tab, ActFocusLeft pops a NavFrame instead of
+	// Esc cancels an active search filter (lazygit-style) before anything
+	// else; in the hierarchy tab it otherwise pops a NavFrame instead of
 	// shifting focus.
 	if action == ActFocusLeft {
+		if a.clearFocusedFilter() {
+			return a, nil
+		}
 		if cmd, ok := a.goBack(); ok {
 			return a, cmd
 		}
@@ -47,6 +51,7 @@ func (a *App) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.helpSearching = false
 		return a, nil
 	case ActSearch:
+		a.clearFocusedFilter()
 		a.searchBar.Activate()
 		return a, nil
 	case ActSelect:
